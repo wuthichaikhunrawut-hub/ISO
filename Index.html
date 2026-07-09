@@ -470,12 +470,10 @@
             </div>
             <div class="form-group">
               <label>ประเภทเอกสาร (Type)</label>
-              <select id="doc-form-type">
-                <option value="Policy">Policy</option>
-                <option value="Procedure">Procedure</option>
-                <option value="Form">Form</option>
-                <option value="Report">Report</option>
-              </select>
+              <input type="text" id="doc-form-type" list="doc-type-options" placeholder="เลือกหรือพิมพ์ประเภทเอกสาร..." autocomplete="off">
+              <datalist id="doc-type-options">
+                <!-- Loaded dynamically from existing data -->
+              </datalist>
             </div>
           </div>
           <div class="form-row">

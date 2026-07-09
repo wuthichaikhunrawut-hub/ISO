@@ -108,7 +108,7 @@
         checkFinished();
       })
       .apiGetUserAccessMatrix();
-      
+
     // โหลดข้อมูลแอดมินล่วงหน้า ถ้ามีสิทธิ์
     if (appState.user.role === "Admin") {
       document.getElementById('menu-admin-users').style.display = 'block';
@@ -117,6 +117,7 @@
       google.script.run.withSuccessHandler(res => appState.auditTrails = res).apiGetAuditTrails();
     }
   }
+
 
   /**
    * อัปเดตข้อมูลผู้ใช้งานบนแถบเมนูด้านข้าง
@@ -158,6 +159,9 @@
       domainSelect.appendChild(opt);
     });
 
+    // โหลดประเภทเอกสารจาก Document_Types Sheet ไปยังทุก Dropdown ในระบบ
+    populateDocTypeDropdowns();
+
     // โหลดรายชื่อเอกสารเข้าใน Dropdown ฟอร์มอัปโหลดหลักฐาน
     populateReferenceDocumentsDropdown();
 
@@ -188,7 +192,87 @@
         evFilterDeptSelect.appendChild(opt);
       });
     }
+
+    updateUserUI();
   }
+
+  /**
+   * โหลดประเภทเอกสารที่มีอยู่แล้วใน masterDocs มาเติมใน datalist
+   * ให้ช่อง doc-form-type พิมพ์เองได้หรือเลือกจาก suggestion
+   */
+  function populateDocTypeDropdowns() {
+    const datalist = document.getElementById("doc-type-options");
+    if (!datalist) return;
+
+    // ดึงค่าที่ไม่ซ้ำจากข้อมูลเอกสารที่มีอยู่
+    const existingTypes = [...new Set(
+      appState.masterDocs.map(d => d.doc_type).filter(Boolean)
+    )];
+
+    datalist.innerHTML = existingTypes.map(t => `<option value="${t}">`).join("");
+  }
+
+  /**
+   * เปิดโมดอลจัดการประเภทเอกสาร (Admin Only)
+   */
+  function openDocTypeManagerModal() {
+    renderDocTypeList();
+    document.getElementById("modal-doc-type-manager").style.display = "flex";
+  }
+
+  function closeDocTypeManagerModal() {
+    document.getElementById("modal-doc-type-manager").style.display = "none";
+  }
+
+  function renderDocTypeList() {
+    const listEl = document.getElementById("doc-type-list");
+    if (!listEl) return;
+    const types = (appState.documentTypes || []);
+    if (types.length === 0) {
+      listEl.innerHTML = `<div style="color:var(--text-muted); text-align:center; padding:12px;">ยังไม่มีประเภทเอกสารในระบบ</div>`;
+      return;
+    }
+    listEl.innerHTML = types.map(t => `
+      <div style="display:flex; align-items:center; justify-content:space-between; padding:8px 12px; background:var(--surface); border-radius:8px; margin-bottom:6px;">
+        <span style="font-weight:500;">${t.type_name}</span>
+        <button class="btn btn-danger btn-icon" onclick="deleteDocType('${t.type_name}')" title="ลบประเภทนี้" style="padding:4px 8px; font-size:0.8rem;">🗑️</button>
+      </div>
+    `).join("");
+  }
+
+  function addDocType() {
+    const input = document.getElementById("new-doc-type-input");
+    const typeName = input.value.trim();
+    if (!typeName) { showToast("กรุณากรอกชื่อประเภทเอกสาร", "warning"); return; }
+    google.script.run
+      .withSuccessHandler(() => {
+        showToast(`เพิ่มประเภทเอกสาร "${typeName}" สำเร็จ`, "success");
+        input.value = "";
+        google.script.run.withSuccessHandler(res => {
+          appState.documentTypes = res;
+          populateDocTypeDropdowns();
+          renderDocTypeList();
+        }).apiGetDocumentTypes();
+      })
+      .withFailureHandler(err => showToast("เกิดข้อผิดพลาด: " + err.message, "danger"))
+      .apiSaveDocumentType(typeName, appState.user.email);
+  }
+
+  function deleteDocType(typeName) {
+    if (!confirm(`ยืนยันการลบประเภทเอกสาร "${typeName}" ออกจากระบบ?`)) return;
+    google.script.run
+      .withSuccessHandler(() => {
+        showToast(`ลบประเภทเอกสาร "${typeName}" สำเร็จ`, "success");
+        google.script.run.withSuccessHandler(res => {
+          appState.documentTypes = res;
+          populateDocTypeDropdowns();
+          renderDocTypeList();
+        }).apiGetDocumentTypes();
+      })
+      .withFailureHandler(err => showToast("เกิดข้อผิดพลาด: " + err.message, "danger"))
+      .apiDeleteDocumentType(typeName, appState.user.email);
+  }
+
 
   /**
    * ซิงค์และโหลดรายชื่อเอกสารเข้าใน Dropdown ฟอร์มอัปโหลดหลักฐาน (ยื่นหลักฐาน)
