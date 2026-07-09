@@ -10,6 +10,7 @@ function doGet(e) {
   // ตรวจสอบและอัปเกรดโครงสร้างคอลัมน์ให้อัตโนมัติ (Schema Migration)
   try {
     ensureUserCodeColumnExists();
+    ensureApprovedByColumnExists();
     ensureMasterDocumentsSchemaUpgraded();
     ensureMasterDocumentsHeadersExist();
     fixValidationRules();
@@ -189,8 +190,8 @@ function initDatabase() {
       }
     },
     "Master_Documents": {
-      headers: ["doc_type", "doc_id", "title", "owner", "edition", "revision", "effective_date", "policy", "drive_link", "review_frequency_months", "next_review_date", "evidence_frequency", "status"],
-      sample: ["Procedure", "ISMS-PROC-02", "Access Control Procedure", "System IT Dept", "1", "0", "2026-07-09", "A.5.15", "https://drive.google.com/open?id=1xyz...", 12, "2027-07-09", "Monthly", "Approved"],
+      headers: ["doc_type", "doc_id", "title", "owner", "edition", "revision", "effective_date", "policy", "drive_link", "review_frequency_months", "next_review_date", "evidence_frequency", "status", "approved_by"],
+      sample: ["Procedure", "ISMS-PROC-02", "Access Control Procedure", "System IT Dept", "1", "0", "2026-07-09", "A.5.15", "https://drive.google.com/open?id=1xyz...", 12, "2027-07-09", "Monthly", "Approved", "approver@company.com"],
       validations: {
         "A2:A1000": { type: "list", values: ["Policy", "Procedure", "Form", "Report"] },
         "G2:G1000": { type: "date" },
@@ -343,6 +344,28 @@ function ensureUserCodeColumnExists() {
 }
 
 /**
+ * ตรวจสอบและแทรกคอลัมน์ approved_by ท้ายตาราง Master_Documents หากไม่มี (Schema Migration)
+ */
+function ensureApprovedByColumnExists() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName("Master_Documents");
+  if (!sheet) return;
+  
+  var lastCol = sheet.getLastColumn();
+  if (lastCol === 0) return;
+  
+  var headers = sheet.getRange(1, 1, 1, lastCol).getValues()[0];
+  var appIdx = headers.indexOf("approved_by");
+  
+  if (appIdx === -1) {
+    sheet.insertColumnAfter(lastCol);
+    sheet.getRange(1, lastCol + 1).setValue("approved_by");
+    SpreadsheetApp.flush();
+    Logger.log("อัปเกรดโครงสร้างตารางเรียบร้อย: เพิ่มคอลัมน์ approved_by");
+  }
+}
+
+/**
  * ฟังก์ชันตรวจสอบและอัปเกรดตาราง Master_Documents และแปลงข้อมูลพนักงานตามฟีดที่ผู้ใช้ต้องการ
  */
 function ensureMasterDocumentsSchemaUpgraded() {
@@ -395,7 +418,7 @@ function ensureMasterDocumentsSchemaUpgraded() {
     sheet.setDataValidations([]);
     
     // 3. เขียนหัวตารางชุดใหม่
-    var newHeaders = ["doc_type", "doc_id", "title", "owner", "edition", "revision", "effective_date", "policy", "drive_link", "review_frequency_months", "next_review_date", "evidence_frequency", "status"];
+    var newHeaders = ["doc_type", "doc_id", "title", "owner", "edition", "revision", "effective_date", "policy", "drive_link", "review_frequency_months", "next_review_date", "evidence_frequency", "status", "approved_by"];
     sheet.getRange(1, 1, 1, newHeaders.length).setValues([newHeaders]);
     
     // 4. เขียนข้อมูลพนักงานใหม่ที่แปลงตามโครงสร้างใหม่แล้ว
@@ -429,7 +452,8 @@ function ensureMasterDocumentsSchemaUpgraded() {
           oldRow.review_frequency_months || 12,
           oldRow.next_review_date ? safeFormatDate(oldRow.next_review_date) : "",
           oldRow.evidence_frequency || "Monthly",
-          oldRow.status || "Approved"
+          oldRow.status || "Approved",
+          oldRow.approved_by || ""
         ];
       });
       
