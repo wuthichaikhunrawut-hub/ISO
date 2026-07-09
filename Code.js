@@ -12,7 +12,6 @@ function doGet(e) {
     ensureUserCodeColumnExists();
     ensureMasterDocumentsSchemaUpgraded();
     ensureMasterDocumentsHeadersExist();
-    ensureDocumentTypesSheetExists();
     fixValidationRules();
   } catch(err) {
     Logger.log("Migration Error: " + err.message);
@@ -80,28 +79,6 @@ function apiGetAuditTrails() {
 function apiGetUserAccessMatrix() {
   // ดึงรายการผู้ใช้เพื่อใช้แมปแผนกและสิทธิ์การแสดงผลในหน้าเว็บแอป
   return DB.getTableData("User_Access_Matrix");
-}
-
-function apiGetDocumentTypes() {
-  return DB.getTableData("Document_Types");
-}
-
-function apiSaveDocumentType(typeName, ipAddress) {
-  var user = getCurrentUserRole();
-  if (user.role !== "Admin") throw new Error("เฉพาะ Admin เท่านั้นที่สามารถจัดการประเภทเอกสารได้");
-  var existing = DB.getRowByField("Document_Types", "type_name", typeName);
-  if (existing) throw new Error("ประเภทเอกสาร \"" + typeName + "\" มีอยู่แล้วในระบบ");
-  DB.insertRow("Document_Types", { type_name: typeName });
-  logAuditTrail("Create", "Document_Types", typeName, "Added document type: " + typeName, ipAddress);
-  return { success: true };
-}
-
-function apiDeleteDocumentType(typeName, ipAddress) {
-  var user = getCurrentUserRole();
-  if (user.role !== "Admin") throw new Error("เฉพาะ Admin เท่านั้นที่สามารถลบประเภทเอกสารได้");
-  DB.deleteRow("Document_Types", "type_name", typeName);
-  logAuditTrail("Delete", "Document_Types", typeName, "Deleted document type: " + typeName, ipAddress);
-  return { success: true };
 }
 
 function apiSaveMasterDocument(docData, selectedControls, ipAddress) {
@@ -186,16 +163,11 @@ function initDatabase() {
         "D2:D1000": { type: "list", values: ["Ready", "In Progress", "Missing", "N/A"] }
       }
     },
-    "Document_Types": {
-      headers: ["type_name"],
-      sample: ["Policy"],
-      validations: {}
-    },
     "Master_Documents": {
       headers: ["doc_type", "doc_id", "title", "owner", "edition", "revision", "effective_date", "policy", "drive_link", "review_frequency_months", "next_review_date", "evidence_frequency", "status"],
       sample: ["Procedure", "ISMS-PROC-02", "Access Control Procedure", "System IT Dept", "1", "0", "2026-07-09", "A.5.15", "https://drive.google.com/open?id=1xyz...", 12, "2027-07-09", "Monthly", "Approved"],
       validations: {
-        "A2:A1000": { type: "range", sourceSheet: "Document_Types", sourceRange: "A2:A1000" },
+        "A2:A1000": { type: "list", values: ["Policy", "Procedure", "Form", "Report"] },
         "G2:G1000": { type: "date" },
         "K2:K1000": { type: "date" },
         "L2:L1000": { type: "list", values: ["Monthly", "Quarterly", "Annually", "Ad-hoc"] },
@@ -556,36 +528,3 @@ function fixValidationRules() {
   }
 }
 
-/**
- * สร้าง Sheet Document_Types และเติมข้อมูลตั้งต้น ถ้ายังไม่มีอยู่ในระบบ
- */
-function ensureDocumentTypesSheetExists() {
-  var ss = SpreadsheetApp.getActiveSpreadsheet();
-  var sheet = ss.getSheetByName("Document_Types");
-  if (!sheet) {
-    sheet = ss.insertSheet("Document_Types");
-    sheet.getRange(1, 1).setValue("type_name");
-    var defaultTypes = ["Policy", "Procedure", "Form", "Report", "Manual", "Guideline"];
-    defaultTypes.forEach(function(t, i) {
-      sheet.getRange(i + 2, 1).setValue(t);
-    });
-    Logger.log("สร้าง Sheet Document_Types และเติมข้อมูลตั้งต้นสำเร็จ");
-  }
-  // ผูก Validation ใน Master_Documents!A ให้ดึงจาก Document_Types!A
-  var masterSheet = ss.getSheetByName("Master_Documents");
-  if (masterSheet) {
-    try {
-      var docTypeRange = masterSheet.getRange("A2:A1000");
-      docTypeRange.clearDataValidations();
-      var sourceRange = sheet.getRange("A2:A1000");
-      var rule = SpreadsheetApp.newDataValidation()
-        .requireValueInRange(sourceRange, true)
-        .setAllowInvalid(true)
-        .build();
-      docTypeRange.setDataValidation(rule);
-      Logger.log("ผูก Data Validation Master_Documents!A -> Document_Types!A สำเร็จ");
-    } catch(e) {
-      Logger.log("ไม่สามารถผูก Validation: " + e.message);
-    }
-  }
-}
