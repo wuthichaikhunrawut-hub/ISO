@@ -200,31 +200,53 @@
    * ดึงค่า dropdown ของ doc_type จาก Data Validation ที่กำหนดใน Master_Documents!A
    * แล้วนำมาเติมใน <select id="doc-form-type"> ในหน้าเว็บ
    */
+  /**
+   * ดึงค่า dropdown ของ doc_type จาก Data Validation ที่กำหนดใน Master_Documents!A
+   * แล้วนำมาเติมลงใน Dropdown เลือกประเภทเอกสารทุกจุดในหน้าเว็บ
+   */
   function populateDocTypeDropdowns() {
     google.script.run
       .withSuccessHandler(function(types) {
-        const select = document.getElementById("doc-form-type");
-        if (!select) return;
-        const current = select.value;
-        select.innerHTML = '<option value="">-- เลือกประเภทเอกสาร --</option>';
-        (types || []).forEach(function(t) {
-          const opt = document.createElement("option");
-          opt.value = t;
-          opt.innerText = t;
-          if (t === current) opt.selected = true;
-          select.appendChild(opt);
+        const docTypes = types || ["Policy", "Procedure", "Form", "Report"];
+        
+        const targets = [
+          { id: "doc-form-type", placeholder: "-- เลือกประเภทเอกสาร --" },
+          { id: "ev-form-doc-type", placeholder: "-- เลือกประเภทเอกสาร --" },
+          { id: "ev-edit-doc-type", placeholder: "-- เลือกประเภทเอกสาร --" },
+          { id: "filter-evidence-doc-type", placeholder: "ทุกประเภทเอกสาร" }
+        ];
+
+        targets.forEach(function(target) {
+          const el = document.getElementById(target.id);
+          if (!el) return;
+          const currentVal = el.value;
+          el.innerHTML = `<option value="">${target.placeholder}</option>`;
+          docTypes.forEach(function(t) {
+            const opt = document.createElement("option");
+            opt.value = t;
+            opt.innerText = t;
+            if (t === currentVal) opt.selected = true;
+            el.appendChild(opt);
+          });
         });
       })
       .withFailureHandler(function() {
-        // fallback: ถ้าดึงไม่ได้ ให้ใช้ค่า default
-        const select = document.getElementById("doc-form-type");
-        if (!select) return;
         const defaults = ["Policy", "Procedure", "Form", "Report"];
-        select.innerHTML = '<option value="">-- เลือกประเภทเอกสาร --</option>';
-        defaults.forEach(function(t) {
-          const opt = document.createElement("option");
-          opt.value = t; opt.innerText = t;
-          select.appendChild(opt);
+        const targets = [
+          { id: "doc-form-type", placeholder: "-- เลือกประเภทเอกสาร --" },
+          { id: "ev-form-doc-type", placeholder: "-- เลือกประเภทเอกสาร --" },
+          { id: "ev-edit-doc-type", placeholder: "-- เลือกประเภทเอกสาร --" },
+          { id: "filter-evidence-doc-type", placeholder: "ทุกประเภทเอกสาร" }
+        ];
+        targets.forEach(function(target) {
+          const el = document.getElementById(target.id);
+          if (!el) return;
+          el.innerHTML = `<option value="">${target.placeholder}</option>`;
+          defaults.forEach(function(t) {
+            const opt = document.createElement("option");
+            opt.value = t; opt.innerText = t;
+            el.appendChild(opt);
+          });
         });
       })
       .apiGetDocTypeOptions();
