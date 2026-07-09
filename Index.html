@@ -1,0 +1,765 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <base target="_top">
+  <meta charset="utf-8">
+  <title>ระบบจัดการไฟล์มาตรฐาน ISO 27001</title>
+  <?!= include('Styles'); ?>
+</head>
+<body>
+
+  <!-- Loading Overlay -->
+  <div id="loading-overlay" class="loading-overlay">
+    <div class="spinner" style="width: 48px; height: 48px; border-width: 4px;"></div>
+    <div style="font-weight: 600; font-size: 1.1rem; color: var(--text-main);">กำลังโหลดข้อมูลระบบ...</div>
+  </div>
+
+  <!-- Top Navigation Bar -->
+  <div class="top-nav">
+    <div class="nav-container">
+      <div class="logo-area">
+        <div class="logo-icon">ISO</div>
+        <div class="logo-text">
+          <h1>ISMS Portal</h1>
+          <p style="font-size:0.65rem; color:var(--text-muted); letter-spacing:0.5px; margin-top:2px;">ISO 27001 SYSTEM</p>
+        </div>
+      </div>
+      
+      <ul class="menu-list">
+        <li>
+          <a class="menu-item active" onclick="switchView('dashboard')">
+            แดชบอร์ดหลัก
+          </a>
+        </li>
+        <li>
+          <a class="menu-item" onclick="switchView('evidence')">
+            ค้นหาและบันทึกไฟล์
+          </a>
+        </li>
+        <li>
+          <a class="menu-item" onclick="switchView('documents')">
+            เอกสารหลักควบคุม
+          </a>
+        </li>
+        <li>
+          <a class="menu-item" onclick="switchView('controls')">
+            ข้อกำหนดมาตรฐาน
+          </a>
+        </li>
+        <li id="menu-admin-users" style="display:none;">
+          <a class="menu-item" onclick="switchView('admin-users')">
+            จัดการสิทธิ์ผู้ใช้
+          </a>
+        </li>
+        <li id="menu-admin-audit" style="display:none;">
+          <a class="menu-item" onclick="switchView('admin-audit')">
+            ประวัติกิจกรรม
+          </a>
+        </li>
+      </ul>
+
+      <!-- User Badge -->
+      <div class="user-badge">
+        <div class="user-avatar" id="current-user-avatar">?</div>
+        <div class="user-info">
+          <div class="user-name" id="current-user-name">Loading...</div>
+          <div class="user-role" id="current-user-role">Guest</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Main Content -->
+  <div class="main-content">
+    
+    <header>
+      <div class="page-title">
+        <h2 id="view-title">ค้นหาและบันทึกไฟล์</h2>
+        <p id="view-desc">ประวัติการส่งไฟล์หลักฐานยืนยันความปลอดภัยและการทำงาน</p>
+      </div>
+    </header>
+
+    <!-- VIEW: Dashboard -->
+    <div id="view-dashboard" class="app-view active">
+      <div class="dashboard-stats">
+        <div class="stat-card">
+          <div class="stat-header">
+            <span>ข้อกำหนดทั้งหมด</span>
+            <div class="stat-icon" style="background-color:rgba(6, 182, 212, 0.15); color:var(--info);">
+              <svg style="width:20px; height:20px;" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2"></path></svg>
+            </div>
+          </div>
+          <div class="stat-value" id="stat-total-controls">0</div>
+          <div class="stat-footer">หัวข้อประเมิน</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-header">
+            <span>พร้อมใช้งาน (Ready)</span>
+            <div class="stat-icon" style="background-color:rgba(16, 185, 129, 0.15); color:var(--success);">
+              <svg style="width:20px; height:20px;" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path></svg>
+            </div>
+          </div>
+          <div class="stat-value" id="stat-ready-controls" style="color:var(--success);">0</div>
+          <div class="stat-footer">ผ่านเกณฑ์ความพร้อม</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-header">
+            <span>เอกสารในระบบ</span>
+            <div class="stat-icon" style="background-color:rgba(59, 130, 246, 0.15); color:var(--primary);">
+              <svg style="width:20px; height:20px;" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13"></path></svg>
+            </div>
+          </div>
+          <div class="stat-value" id="stat-total-docs">0</div>
+          <div class="stat-footer">เอกสารควบคุมหลัก</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-header">
+            <span>หลักฐานที่ยื่นไว้</span>
+            <div class="stat-icon" style="background-color:rgba(245, 158, 11, 0.15); color:var(--warning);">
+              <svg style="width:20px; height:20px;" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"></path></svg>
+            </div>
+          </div>
+          <div class="stat-value" id="stat-total-evidence">0</div>
+          <div class="stat-footer">ไฟล์หลักฐานปฏิบัติงาน</div>
+        </div>
+      </div>
+
+      <div class="analytics-grid">
+        <div class="panel-card">
+          <div class="panel-header">
+            <h3 class="panel-title">ระดับความพร้อมขององค์กร</h3>
+          </div>
+          <div class="compliance-wheel-box">
+            <div class="compliance-svg-box">
+              <svg class="compliance-svg-circle">
+                <circle class="compliance-circle-bg" cx="80" cy="80" r="70"></circle>
+                <circle id="compliance-progress-circle" class="compliance-circle-progress" cx="80" cy="80" r="70"></circle>
+              </svg>
+              <div class="compliance-text-center">
+                <div class="compliance-percent" id="compliance-percent-val">0%</div>
+                <div class="compliance-label">สอดคล้อง</div>
+              </div>
+            </div>
+            <div class="legend-list">
+              <div class="legend-item"><span class="indicator" style="background-color:var(--success);"></span>Ready (<span id="count-ready">0</span>)</div>
+              <div class="legend-item"><span class="indicator" style="background-color:var(--warning);"></span>In Progress (<span id="count-progress">0</span>)</div>
+              <div class="legend-item"><span class="indicator" style="background-color:var(--danger);"></span>Missing (<span id="count-missing">0</span>)</div>
+              <div class="legend-item"><span class="indicator" style="background-color:var(--text-muted);"></span>N/A (<span id="count-na">0</span>)</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="panel-card">
+          <div class="panel-header">
+            <h3 class="panel-title">ข้อกำหนดที่ยังต้องการการแก้ไขเร่งด่วน (Missing / In Progress)</h3>
+          </div>
+          <div class="table-container" style="max-height: 250px; overflow-y: auto;">
+            <table>
+              <thead>
+                <tr>
+                  <th>รหัส Control</th>
+                  <th>รายละเอียดข้อกำหนด</th>
+                  <th>สถานะ</th>
+                </tr>
+              </thead>
+              <tbody id="dashboard-pending-table">
+                <!-- Data will load here -->
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- VIEW: ISO Controls -->
+    <div id="view-controls" class="app-view">
+      <div class="filters-row">
+        <div class="search-box">
+          <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path></svg>
+          <input type="text" id="filter-control-search" placeholder="ค้นหาตามรหัส/ข้อกำหนด..." oninput="renderControlsTable()">
+        </div>
+        <div style="display:flex; gap:12px;">
+          <div class="select-box">
+            <select id="filter-control-domain" onchange="renderControlsTable()">
+              <option value="">ทุกกลุ่มข้อกำหนด (Domain)</option>
+              <!-- Populated dynamically -->
+            </select>
+          </div>
+          <div class="select-box">
+            <select id="filter-control-status" onchange="renderControlsTable()">
+              <option value="">ทุกสถานะประเมิน</option>
+              <option value="Ready">Ready</option>
+              <option value="In Progress">In Progress</option>
+              <option value="Missing">Missing</option>
+              <option value="N/A">N/A</option>
+            </select>
+          </div>
+        </div>
+      </div>
+
+      <div class="panel-card">
+        <div class="table-container">
+          <table>
+            <thead>
+              <tr>
+                <th style="width:120px;">รหัส Control</th>
+                <th style="width:180px;">โดเมน</th>
+                <th>รายละเอียดข้อกำหนด</th>
+                <th style="width:160px;">สถานะ</th>
+                <th style="width:100px; text-align:center;">จัดการ</th>
+              </tr>
+            </thead>
+            <tbody id="controls-table-body">
+              <!-- Load dynamically -->
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- VIEW: Master Documents -->
+    <div id="view-documents" class="app-view">
+      <div class="filters-row">
+        <div class="search-box">
+          <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path></svg>
+          <input type="text" id="filter-doc-search" placeholder="ค้นหารหัส/ชื่อเอกสาร..." oninput="renderDocumentsTable()">
+        </div>
+        <div>
+          <button class="btn btn-primary btn-admin-only" onclick="openAddDocModal()">
+            <svg style="width:18px; height:18px;" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"></path></svg>
+            เพิ่มเอกสารหลักใหม่
+          </button>
+        </div>
+      </div>
+
+      <div class="panel-card">
+        <div class="table-container">
+          <table>
+            <thead>
+              <tr>
+                <th style="width:130px; white-space:nowrap;">ประเภทเอกสาร</th>
+                <th style="width:140px; white-space:nowrap;">หมายเลขเอกสาร</th>
+                <th>ชื่อเอกสาร</th>
+                <th style="white-space:nowrap;">ผู้จัดทำ</th>
+                <th style="width:70px; white-space:nowrap; text-align:center;">ฉบับที่</th>
+                <th style="width:100px; white-space:nowrap; text-align:center;">แก้ไขครั้งที่</th>
+                <th style="width:130px; white-space:nowrap;">วันที่ประกาศใช้</th>
+                <th style="width:150px; text-align:center; white-space:nowrap;">จัดการ</th>
+              </tr>
+            </thead>
+            <tbody id="documents-table-body">
+              <!-- Load dynamically -->
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- VIEW: Evidence Logs -->
+    <div id="view-evidence" class="app-view">
+      <div class="filters-row">
+        <div class="search-box">
+          <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path></svg>
+          <input type="text" id="filter-evidence-search" placeholder="ค้นหาหลักฐาน/ผู้ส่ง..." oninput="renderEvidenceTable()">
+        </div>
+        <div style="display:flex; gap:12px; align-items:center; flex-wrap:wrap;">
+          <div class="select-box">
+            <select id="filter-evidence-year" onchange="renderEvidenceTable()">
+              <option value="">ทุกปี</option>
+              <!-- Loaded dynamically -->
+            </select>
+          </div>
+          <div class="select-box">
+            <select id="filter-evidence-doc-type" onchange="renderEvidenceTable()">
+              <option value="">ทุกประเภทเอกสาร</option>
+              <option value="Policy">Policy</option>
+              <option value="Procedure">Procedure</option>
+              <option value="Form">Form</option>
+              <option value="Report">Report</option>
+            </select>
+          </div>
+          <div class="select-box" style="max-width:220px;">
+            <select id="filter-evidence-control" onchange="renderEvidenceTable()">
+              <option value="">ทุกข้อกำหนด (ISO Control)</option>
+              <!-- Loaded dynamically -->
+            </select>
+          </div>
+          <div class="select-box">
+            <select id="filter-evidence-dept" onchange="renderEvidenceTable()">
+              <option value="">ทุกแผนกผู้ส่ง</option>
+              <!-- Loaded dynamically -->
+            </select>
+          </div>
+          <button class="btn btn-primary owner-or-admin-only" onclick="openUploadEvidenceModal()">
+            <svg style="width:18px; height:18px;" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"></path></svg>
+            ยื่นหลักฐานการทำงาน
+          </button>
+        </div>
+      </div>
+
+      <div class="panel-card">
+        <div class="table-container">
+          <table>
+            <thead>
+              <tr>
+                <th style="width:60px; white-space:nowrap;">รหัส</th>
+                <th style="width:130px; white-space:nowrap;">วันที่ยื่น</th>
+                <th style="width:150px; white-space:nowrap;">อ้างอิงเอกสาร</th>
+                <th style="width:110px; white-space:nowrap;">รอบงาน</th>
+                <th>รายละเอียด / คำชี้แจง</th>
+                <th style="width:120px; white-space:nowrap;">ลิงก์เปิดไฟล์</th>
+                <th style="width:180px; white-space:nowrap;">ผู้ส่งบันทึก</th>
+                <th style="width:120px; text-align:center; white-space:nowrap;">จัดการ</th>
+              </tr>
+            </thead>
+            <tbody id="evidence-table-body">
+              <!-- Load dynamically -->
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- VIEW: Admin Users -->
+    <div id="view-admin-users" class="app-view">
+      <div class="filters-row">
+        <div class="search-box">
+          <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path></svg>
+          <input type="text" id="filter-user-search" placeholder="ค้นหาชื่อ/อีเมล..." oninput="renderUsersTable()">
+        </div>
+        <div>
+          <button class="btn btn-primary" onclick="openAddUserModal()">
+            <svg style="width:18px; height:18px;" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M18 9v3m0 0v3m0-3h3m-3 0h-3m-2-5a4 4 0 11-8 0 4 4 0 018 0zM3 20a6 6 0 0112 0v1H3v-1z"></path></svg>
+            เพิ่มผู้ใช้งานใหม่
+          </button>
+        </div>
+      </div>
+
+      <div class="panel-card">
+        <div class="table-container">
+          <table>
+            <thead>
+              <tr>
+                <th style="width:120px;">รหัสสมาชิก</th>
+                <th>อีเมลล็อกอิน</th>
+                <th>ชื่อ-นามสกุล</th>
+                <th>แผนก</th>
+                <th>บทบาท (สิทธิ์)</th>
+                <th>สถานะบัญชี</th>
+                <th>วันที่ทบทวนสิทธิ์</th>
+                <th style="width:120px; text-align:center;">จัดการ</th>
+              </tr>
+            </thead>
+            <tbody id="users-table-body">
+              <!-- Load dynamically -->
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- VIEW: Admin Audit Trails -->
+    <div id="view-admin-audit" class="app-view">
+      <div class="filters-row">
+        <div class="search-box">
+          <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path></svg>
+          <input type="text" id="filter-audit-search" placeholder="ค้นหากิจกรรม/รหัสอ้างอิง..." oninput="renderAuditTable()">
+        </div>
+      </div>
+
+      <div class="panel-card">
+        <div class="table-container">
+          <table>
+            <thead>
+              <tr>
+                <th style="width:80px;">รหัส log</th>
+                <th style="width:150px;">วันเวลาที่เกิด</th>
+                <th style="width:90px;">กิจกรรม</th>
+                <th style="width:130px;">ตารางเป้าหมาย</th>
+                <th style="width:120px;">ID แถวข้อมูล</th>
+                <th style="width:150px;">อีเมลผู้ดำเนินการ</th>
+                <th>รายละเอียดการทำงาน</th>
+                <th style="width:120px;">IP Address</th>
+              </tr>
+            </thead>
+            <tbody id="audit-table-body">
+              <!-- Load dynamically -->
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- MODAL: Control Details & Manual Status Update -->
+  <div id="modal-control-detail" class="modal-overlay">
+    <div class="modal-card">
+      <div class="modal-header">
+        <h3 id="m-control-title" style="font-weight:700;">รายละเอียดข้อกำหนด</h3>
+        <button class="btn btn-icon btn-secondary" onclick="closeModal('modal-control-detail')">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div class="form-group">
+          <label>กลุ่มโดเมน (Domain)</label>
+          <div id="m-control-domain" style="font-weight:600; padding:10px; background-color:var(--bg-main); border-radius:var(--radius-sm);"></div>
+        </div>
+        <div class="form-group">
+          <label>รายละเอียดข้อกำหนดมาตรฐาน</label>
+          <div id="m-control-desc" style="padding:10px; background-color:var(--bg-main); border-radius:var(--radius-sm); font-size:0.9rem;"></div>
+        </div>
+        
+        <div class="form-group">
+          <label>เอกสารอ้างอิงที่เกี่ยวข้อง (Mapped Documents)</label>
+          <div id="m-control-docs-list" style="padding:10px; background-color:var(--bg-main); border-radius:var(--radius-sm); font-size:0.9rem;">
+            <!-- Render lists of documents -->
+          </div>
+        </div>
+
+        <hr style="border:none; border-top: 1px solid var(--border-color); margin: 20px 0;">
+
+        <!-- Admin Only Status Form -->
+        <div class="admin-only-section">
+          <h4 style="margin-bottom:12px; font-weight:600; font-size:0.95rem;">ประเมินและทบทวนข้อกำหนดนี้ (สำหรับผู้ดูแลระบบ)</h4>
+          <input type="hidden" id="edit-control-code">
+          <div class="form-group">
+            <label>สถานะประเมินตนเอง (Assessment Status)</label>
+            <select id="edit-control-status">
+              <option value="Ready">Ready</option>
+              <option value="In Progress">In Progress</option>
+              <option value="Missing">Missing</option>
+              <option value="N/A">N/A</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label>แนวปฏิบัติการ / ช่องว่างการปรับปรุง (Gap Analysis & Action Plan)</label>
+            <textarea id="edit-control-gap" rows="3" placeholder="ระบุการปฏิบัติการควบคุมสิทธิ์, แบบฟอร์ม, หรือแผนที่ต้องทำเพิ่ม..."></textarea>
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" onclick="closeModal('modal-control-detail')">ยกเลิก</button>
+        <button class="btn btn-primary admin-only-section" id="btn-save-control-status" onclick="saveControlStatus()">บันทึกการประเมิน</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL: Document Master Create/Update -->
+  <div id="modal-document-form" class="modal-overlay">
+    <div class="modal-card">
+      <div class="modal-header">
+        <h3 id="m-doc-title-header" style="font-weight:700;">เอกสารควบคุมหลัก</h3>
+        <button class="btn btn-icon btn-secondary" onclick="closeModal('modal-document-form')">&times;</button>
+      </div>
+      <div class="modal-body">
+        <form id="doc-form">
+          <div class="form-row">
+            <div class="form-group">
+              <label>หมายเลขเอกสาร (Document ID)</label>
+              <input type="text" id="doc-form-id" placeholder="เช่น ISMS-PROC-02" required>
+            </div>
+            <div class="form-group">
+              <label>ชื่อเอกสาร (Title)</label>
+              <input type="text" id="doc-form-title" placeholder="เช่น นโยบายควบคุมสิทธิ์" required>
+            </div>
+          </div>
+          <div class="form-row">
+            <div class="form-group">
+              <label>ผู้จัดทำ (Prepared By)</label>
+              <input type="text" id="doc-form-owner" placeholder="ระบุชื่อผู้จัดทำ หรือ แผนก" required>
+            </div>
+            <div class="form-group">
+              <label>ประเภทเอกสาร (Type)</label>
+              <select id="doc-form-type">
+                <option value="Policy">Policy</option>
+                <option value="Procedure">Procedure</option>
+                <option value="Form">Form</option>
+                <option value="Report">Report</option>
+              </select>
+            </div>
+          </div>
+          <div class="form-row">
+            <div class="form-group">
+              <label>ฉบับที่ (Edition)</label>
+              <input type="text" id="doc-form-edition" placeholder="เช่น 1" value="1" required>
+            </div>
+            <div class="form-group">
+              <label>แก้ไขครั้งที่ (Revision)</label>
+              <input type="text" id="doc-form-revision" placeholder="เช่น 0" value="0" required>
+            </div>
+          </div>
+          <div class="form-row">
+            <div class="form-group">
+              <label>สถานะ (Status)</label>
+              <select id="doc-form-status">
+                <option value="Draft">Draft</option>
+                <option value="Approved">Approved</option>
+                <option value="Obsolete">Obsolete</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label>ความถี่ทบทวน (ทบทวนทุกๆ กี่เดือน)</label>
+              <input type="number" id="doc-form-freq" value="12" required>
+            </div>
+          </div>
+          <div class="form-row">
+            <div class="form-group">
+              <label>วันที่เริ่มประกาศใช้ (Effective Date)</label>
+              <input type="date" id="doc-form-effective" required>
+            </div>
+            <div class="form-group">
+              <label>ความถี่ของไฟล์หลักฐานที่ต้องยื่น</label>
+              <select id="doc-form-evidence-freq">
+                <option value="Monthly">Monthly</option>
+                <option value="Quarterly">Quarterly</option>
+                <option value="Annually">Annually</option>
+                <option value="Ad-hoc">Ad-hoc</option>
+              </select>
+            </div>
+          </div>
+          <div class="form-row">
+            <div class="form-group">
+              <label>ผู้อนุมัติเอกสาร (Approved By)</label>
+              <input type="email" id="doc-form-approver" placeholder="approver@company.com" required>
+            </div>
+             <div class="form-group">
+               <label>ลิงก์ไฟล์เอกสารบน Google Drive</label>
+               <div style="display:flex; gap:8px;">
+                 <input type="url" id="doc-form-link" placeholder="https://drive.google.com/..." required style="flex:1;">
+                 <button type="button" class="btn btn-secondary" onclick="document.getElementById('doc-form-file-upload').click()" style="padding:0 12px; font-size:0.85rem; white-space:nowrap;">
+                   📤 อัปโหลดไฟล์
+                 </button>
+               </div>
+               <input type="file" id="doc-form-file-upload" onchange="uploadMasterDocFileDirectly(event)" style="display:none;">
+               <div id="doc-upload-status" style="font-size:0.75rem; color:var(--primary); margin-top:4px; display:none;">
+                 กำลังอัปโหลดไฟล์...
+               </div>
+             </div>
+          </div>
+
+          <div class="form-group">
+            <label>ข้อกำหนด ISO 27001 ที่สอดคล้องกับเอกสารนี้ (เลือกได้หลายข้อ)</label>
+            <div class="checkbox-group" id="doc-form-controls-list">
+              <!-- Load Checkboxes -->
+            </div>
+          </div>
+        </form>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" onclick="closeModal('modal-document-form')">ยกเลิก</button>
+        <button class="btn btn-primary" onclick="submitDocForm()">บันทึกข้อมูลเอกสาร</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL: Evidence File Upload -->
+  <div id="modal-evidence-form" class="modal-overlay">
+    <div class="modal-card">
+      <div class="modal-header">
+        <h3 style="font-weight:700;">อัปโหลดและยื่นหลักฐานการทำงาน</h3>
+        <button class="btn btn-icon btn-secondary" onclick="closeModal('modal-evidence-form')">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div class="form-row">
+          <div class="form-group">
+            <label>ประเภทเอกสาร</label>
+            <select id="ev-form-doc-type" onchange="populateReferenceDocumentsDropdown()" required>
+              <option value="">-- เลือกประเภทเอกสาร --</option>
+              <option value="Policy">Policy</option>
+              <option value="Procedure">Procedure</option>
+              <option value="Form">Form</option>
+              <option value="Report">Report</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label>เอกสารอ้างอิงหลัก</label>
+            <select id="ev-form-doc" onchange="updateEvFormControlsDropdown()" required>
+              <option value="">-- เลือกเอกสารอ้างอิงหลัก --</option>
+              <!-- Loaded dynamically -->
+            </select>
+          </div>
+        </div>
+        <div class="form-row">
+          <div class="form-group">
+            <label>หัวข้อ ISO Control ที่ต้องการยื่นประกอบ</label>
+            <select id="ev-form-control" required>
+              <option value="">-- เลือกข้อกำหนด --</option>
+              <!-- Loaded dynamically when doc is chosen -->
+            </select>
+          </div>
+          <div class="form-group">
+            <label>รอบการส่งหลักฐาน (ระบุปี-เดือน เช่น 2026-06)</label>
+            <input type="text" id="ev-form-period" placeholder="เช่น 2026-06" required>
+          </div>
+        </div>
+        <div class="form-group">
+          <label>อธิบายรายละเอียดของหลักฐานที่ยื่น</label>
+          <textarea id="ev-form-details" rows="3" placeholder="เช่น ไฟล์รายงานรายชื่อผู้ใช้ที่ผ่านการอนุมัติสำหรับเดือนมิถุนายน" required></textarea>
+        </div>
+        <div class="form-group">
+          <label>เลือกไฟล์หลักฐานเพื่ออัปโหลดเข้า Drive (เช่น PDF, PNG, ZIP, Log)</label>
+          <input type="file" id="ev-form-file" required>
+          <div id="upload-status" style="font-size:0.8rem; margin-top:8px; display:none;">
+            <span class="spinner" style="display:inline-block; vertical-align:middle; margin-right:8px; width:16px; height:16px; border-width:2px;"></span>
+            <span id="upload-status-text" style="vertical-align:middle;">กำลังเตรียมไฟล์...</span>
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" onclick="closeModal('modal-evidence-form')">ยกเลิก</button>
+        <button class="btn btn-primary" id="btn-submit-evidence" onclick="submitEvidenceForm()">อัปโหลดหลักฐาน</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL: Evidence File Edit -->
+  <div id="modal-evidence-edit-form" class="modal-overlay">
+    <div class="modal-card">
+      <div class="modal-header">
+        <h3 style="font-weight:700;">แก้ไขรายการหลักฐานการทำงาน</h3>
+        <button class="btn btn-icon btn-secondary" onclick="closeModal('modal-evidence-edit-form')">&times;</button>
+      </div>
+      <div class="modal-body">
+        <form id="ev-edit-form">
+          <input type="hidden" id="ev-edit-id">
+          
+          <div class="form-row">
+            <div class="form-group">
+              <label>ประเภทเอกสาร</label>
+              <select id="ev-edit-doc-type" onchange="populateEditReferenceDocumentsDropdown()" required>
+                <option value="">-- เลือกประเภทเอกสาร --</option>
+                <option value="Policy">Policy</option>
+                <option value="Procedure">Procedure</option>
+                <option value="Form">Form</option>
+                <option value="Report">Report</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label>เอกสารอ้างอิงหลัก</label>
+              <select id="ev-edit-doc" onchange="updateEditEvFormControlsDropdown()" required>
+                <option value="">-- เลือกเอกสารอ้างอิงหลัก --</option>
+                <!-- Loaded dynamically -->
+              </select>
+            </div>
+          </div>
+          
+          <div class="form-row">
+            <div class="form-group">
+              <label>หัวข้อ ISO Control ที่ต้องการยื่นประกอบ</label>
+              <select id="ev-edit-control" required>
+                <option value="">-- เลือกข้อกำหนด --</option>
+                <!-- Loaded dynamically when doc is chosen -->
+              </select>
+            </div>
+            <div class="form-group">
+              <label>รอบการส่งหลักฐาน (ระบุปี-เดือน เช่น 2026-06)</label>
+              <input type="text" id="ev-edit-period" placeholder="เช่น 2026-06" required>
+            </div>
+          </div>
+          
+          <div class="form-group">
+            <label>อธิบายรายละเอียดของหลักฐานที่ยื่น</label>
+            <textarea id="ev-edit-details" rows="3" placeholder="ระบุคำอธิบายหลักฐาน" required></textarea>
+          </div>
+          
+          <div class="form-group">
+            <label>ไฟล์หลักฐานปัจจุบัน</label>
+            <div id="ev-edit-current-file-container" style="background:#f4f6f9; padding:8px 12px; border-radius:6px; display:flex; align-items:center; justify-content:space-between; margin-bottom:12px;">
+              <span id="ev-edit-current-file-name" style="font-size:0.85rem; font-weight:500;">
+                <!-- Current file link populated by JS -->
+              </span>
+              <button type="button" id="btn-delete-current-file" class="btn btn-danger" onclick="markCurrentFileDeleted()" style="padding:4px 8px; font-size:0.75rem; white-space:nowrap;">
+                🗑️ ลบไฟล์
+              </button>
+            </div>
+            
+            <label>เปลี่ยนไฟล์หลักฐานใหม่ (เลือกไฟล์ใหม่หากต้องการอัปเดตไฟล์แทนที่ของเดิม)</label>
+            <div style="display:flex; gap:8px; align-items:center;">
+              <input type="file" id="ev-edit-file" onchange="onEditFileChange(event)" style="flex:1;">
+              <button type="button" id="btn-clear-edit-file" class="btn btn-secondary" onclick="clearEditFileInput()" style="display:none; padding:8px 12px; font-size:0.8rem; white-space:nowrap;" title="ยกเลิกการเลือกไฟล์ใหม่">
+                ❌ ล้างไฟล์ที่เลือก
+              </button>
+            </div>
+            <div id="ev-edit-upload-status" style="font-size:0.8rem; margin-top:8px; display:none;">
+              <span class="spinner" style="display:inline-block; vertical-align:middle; margin-right:8px; width:16px; height:16px; border-width:2px;"></span>
+              <span id="ev-edit-upload-status-text" style="vertical-align:middle;">กำลังอัปโหลดไฟล์ใหม่...</span>
+            </div>
+          </div>
+        </form>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" onclick="closeModal('modal-evidence-edit-form')">ยกเลิก</button>
+        <button class="btn btn-primary" id="btn-submit-evidence-edit" onclick="submitEvidenceEditForm()">บันทึกการแก้ไข</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL: User Access Management Form -->
+  <div id="modal-user-form" class="modal-overlay">
+    <div class="modal-card">
+      <div class="modal-header">
+        <h3 id="m-user-title-header" style="font-weight:700;">จัดการรายชื่อสิทธิ์ผู้ใช้</h3>
+        <button class="btn btn-icon btn-secondary" onclick="closeModal('modal-user-form')">&times;</button>
+      </div>
+      <div class="modal-body">
+        <form id="user-form">
+          <div class="form-row">
+            <div class="form-group">
+              <label>รหัสสมาชิก</label>
+              <input type="text" id="user-form-code" placeholder="เช่น EMP-001" required>
+            </div>
+            <div class="form-group">
+              <label>อีเมลบัญชีผู้ใช้งาน (Google Email)</label>
+              <input type="email" id="user-form-email" placeholder="user@company.com" required>
+            </div>
+          </div>
+          <div class="form-group">
+            <label>ชื่อ-นามสกุลจริง</label>
+            <input type="text" id="user-form-name" placeholder="นายสมศักดิ์ แสนสุข" required>
+          </div>
+          <div class="form-row">
+            <div class="form-group">
+              <label>แผนก/ฝ่ายงาน</label>
+              <select id="user-form-dept" required>
+                <option value="IT">IT</option>
+                <option value="HR">HR</option>
+                <option value="QA">QA</option>
+                <option value="Operations">Operations</option>
+                <option value="Finance">Finance</option>
+                <option value="Management">Management</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label>สิทธิ์ในระบบ (Role)</label>
+              <select id="user-form-role">
+                <option value="Admin">Admin</option>
+                <option value="Owner">Owner</option>
+                <option value="Auditor">Auditor</option>
+              </select>
+            </div>
+          </div>
+          <div class="form-group">
+            <label>สถานะบัญชี</label>
+            <select id="user-form-status">
+              <option value="Active">Active</option>
+              <option value="Inactive">Inactive</option>
+            </select>
+          </div>
+        </form>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" onclick="closeModal('modal-user-form')">ยกเลิก</button>
+        <button class="btn btn-primary" onclick="submitUserForm()">บันทึกผู้ใช้</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Toast Notification Box -->
+  <div id="toast" class="toast">
+    <div id="toast-icon"></div>
+    <div id="toast-message"></div>
+  </div>
+
+  <?!= include('JavaScript'); ?>
+</body>
+</html>

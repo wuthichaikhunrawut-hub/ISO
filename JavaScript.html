@@ -1,0 +1,1409 @@
+<script>
+  // ตัวแปรเก็บข้อมูลส่วนกลาง (Global Application State)
+  let appState = {
+    user: { email: "", role: "Guest", name: "Anonymous", allowed: false },
+    complianceStats: { Ready: 0, "In Progress": 0, Missing: 0, "N/A": 0, Total: 0 },
+    isoControls: [],
+    masterDocs: [],
+    evidenceLogs: [],
+    users: [],
+    auditTrails: []
+  };
+
+  // ดึง IP Address ของผู้ใช้งานผ่าน public API เพื่อบันทึกใน Audit Log
+  let userIpAddress = "";
+  fetch('https://api.ipify.org?format=json')
+    .then(res => res.json())
+    .then(data => { userIpAddress = data.ip; })
+    .catch(() => { userIpAddress = "127.0.0.1"; });
+
+  // เมื่อเว็บแอปโหลดเสร็จสิ้น
+  window.addEventListener('load', function() {
+    showLoading(true);
+    loadInitialData();
+  });
+
+  /**
+   * ดึงข้อมูลตั้งต้นทั้งหมดจากเซิร์ฟเวอร์
+   */
+  function loadInitialData() {
+    google.script.run
+      .withSuccessHandler(function(response) {
+        appState.user = response;
+        updateUserUI();
+        
+        if (!appState.user.allowed) {
+          showLoading(false);
+          showToast("บัญชีของคุณไม่มีสิทธิ์เข้าใช้งานระบบ หรือสถานะเป็น Inactive", "danger");
+          document.body.innerHTML = `
+            <div style="display:flex; flex-direction:column; align-items:center; justify-content:center; height:100vh; width:100%; background-color:#0b0f19; color:white; text-align:center; padding: 20px;">
+              <h1 style="color:#ef4444; margin-bottom:16px; font-size:2.5rem; font-weight:700;">❌ Access Denied</h1>
+              <p style="font-size:1.1rem; margin-bottom:8px;">บัญชี <strong style="color:var(--primary); font-weight:600;">${appState.user.email}</strong> ยังไม่ได้รับอนุมัติให้เข้าสู่ระบบ</p>
+              <p style="color:#9ca3af; font-size:0.95rem;">กรุณาติดต่อผู้อำนวยการฝ่าย หรือผู้ดูแลระบบเพื่อขออนุมัติสิทธิ์</p>
+            </div>
+          `;
+          return;
+        }
+
+        // ดึงข้อมูลหลักอื่นๆ
+        loadMainData();
+      })
+      .withFailureHandler(function(err) {
+        showLoading(false);
+        showToast("เกิดข้อผิดพลาดในการยืนยันตัวตน: " + err.message, "danger");
+      })
+      .apiGetCurrentUserRole();
+  }
+
+  function loadMainData() {
+    // ใช้ระบบดาวน์โหลดขนานด้วย Promise-like queue ของ Apps Script
+    let loadedCount = 0;
+    const totalToLoad = 5;
+
+    function checkFinished() {
+      loadedCount++;
+      if (loadedCount >= totalToLoad) {
+        showLoading(false);
+        initUIComponents();
+        switchView('dashboard');
+      }
+    }
+
+    // 1. โหลดข้อมูลความพร้อม
+    google.script.run
+      .withSuccessHandler(function(res) {
+        appState.complianceStats = res;
+        checkFinished();
+      })
+      .apiGetComplianceStats();
+
+    // 2. โหลดรายการ ISO Controls
+    google.script.run
+      .withSuccessHandler(function(res) {
+        appState.isoControls = res;
+        checkFinished();
+      })
+      .apiGetISOControls();
+
+    // 3. โหลดรายการเอกสารหลัก
+    google.script.run
+      .withSuccessHandler(function(res) {
+        appState.masterDocs = res;
+        checkFinished();
+      })
+      .apiGetMasterDocuments();
+
+    // 4. โหลดรายการหลักฐาน
+    google.script.run
+      .withSuccessHandler(function(res) {
+        appState.evidenceLogs = res;
+        checkFinished();
+      })
+      .apiGetEvidenceLogs();
+
+    // 5. โหลดรายชื่อสิทธิ์ผู้ใช้และแผนก (สำหรับประเมิน/ตัวกรอง)
+    google.script.run
+      .withSuccessHandler(function(res) {
+        appState.users = res;
+        checkFinished();
+      })
+      .apiGetUserAccessMatrix();
+      
+    // โหลดข้อมูลแอดมินล่วงหน้า ถ้ามีสิทธิ์
+    if (appState.user.role === "Admin") {
+      document.getElementById('menu-admin-users').style.display = 'block';
+      document.getElementById('menu-admin-audit').style.display = 'block';
+      
+      google.script.run.withSuccessHandler(res => appState.auditTrails = res).apiGetAuditTrails();
+    }
+  }
+
+  /**
+   * อัปเดตข้อมูลผู้ใช้งานบนแถบเมนูด้านข้าง
+   */
+  function updateUserUI() {
+    document.getElementById("current-user-name").innerText = appState.user.name;
+    document.getElementById("current-user-role").innerText = appState.user.role;
+    document.getElementById("current-user-avatar").innerText = appState.user.name.charAt(0).toUpperCase();
+    
+    // จัดการสิทธิ์การแสดงผลในหน้าจอต่างๆ
+    if (appState.user.role === "Admin") {
+      document.querySelectorAll(".admin-only-section").forEach(el => el.style.display = '');
+      document.querySelectorAll(".btn-admin-only").forEach(el => el.style.display = '');
+      document.querySelectorAll(".owner-or-admin-only").forEach(el => el.style.display = '');
+    } else if (appState.user.role === "Owner") {
+      document.querySelectorAll(".admin-only-section").forEach(el => el.style.display = 'none');
+      document.querySelectorAll(".btn-admin-only").forEach(el => el.style.display = 'none');
+      document.querySelectorAll(".owner-or-admin-only").forEach(el => el.style.display = '');
+    } else { // Auditor / Guest
+      document.querySelectorAll(".admin-only-section").forEach(el => el.style.display = 'none');
+      document.querySelectorAll(".btn-admin-only").forEach(el => el.style.display = 'none');
+      document.querySelectorAll(".owner-or-admin-only").forEach(el => el.style.display = 'none');
+    }
+  }
+
+  /**
+   * ตั้งค่าคอมโพเนนต์จำพวก Dropdown
+   */
+  function initUIComponents() {
+    // ใส่กลุ่มโดเมนในเมนูคัดกรอง Control
+    const domainSelect = document.getElementById("filter-control-domain");
+    domainSelect.innerHTML = '<option value="">ทุกกลุ่มข้อกำหนด (Domain)</option>';
+    
+    const domains = [...new Set(appState.isoControls.map(c => c.domain))].filter(Boolean);
+    domains.forEach(d => {
+      const opt = document.createElement("option");
+      opt.value = d;
+      opt.innerText = d;
+      domainSelect.appendChild(opt);
+    });
+
+    // โหลดรายชื่อเอกสารเข้าใน Dropdown ฟอร์มอัปโหลดหลักฐาน
+    populateReferenceDocumentsDropdown();
+
+    // โหลดตัวกรองปีของหน้าเอกสารหลักฐาน
+    populateEvidenceYearFilter();
+
+    // โหลดข้อกำหนด ISO ในตัวกรองหน้าหลักฐาน
+    const evFilterControlSelect = document.getElementById("filter-evidence-control");
+    if (evFilterControlSelect) {
+      evFilterControlSelect.innerHTML = '<option value="">ทุกข้อกำหนด (ISO Control)</option>';
+      appState.isoControls.forEach(c => {
+        const opt = document.createElement("option");
+        opt.value = c.control_code;
+        opt.innerText = `${c.control_code} - ${c.requirement.substring(0, 30)}...`;
+        evFilterControlSelect.appendChild(opt);
+      });
+    }
+
+    // โหลดรายชื่อแผนกในตัวกรองหน้าหลักฐาน
+    const evFilterDeptSelect = document.getElementById("filter-evidence-dept");
+    if (evFilterDeptSelect) {
+      evFilterDeptSelect.innerHTML = '<option value="">ทุกแผนกผู้ส่ง</option>';
+      const depts = [...new Set(appState.users.map(u => u.department))].filter(Boolean);
+      depts.forEach(d => {
+        const opt = document.createElement("option");
+        opt.value = d;
+        opt.innerText = d;
+        evFilterDeptSelect.appendChild(opt);
+      });
+    }
+  }
+
+  /**
+   * ซิงค์และโหลดรายชื่อเอกสารเข้าใน Dropdown ฟอร์มอัปโหลดหลักฐาน (ยื่นหลักฐาน)
+   */
+  function populateReferenceDocumentsDropdown() {
+    const docTypeSelect = document.getElementById("ev-form-doc-type");
+    const evDocSelect = document.getElementById("ev-form-doc");
+    if (!evDocSelect || !docTypeSelect) return;
+    
+    const selectedType = docTypeSelect.value;
+    evDocSelect.innerHTML = '<option value="">-- เลือกเอกสารอ้างอิงหลัก --</option>';
+    
+    // หากยังไม่เลือกประเภทเอกสาร ให้ซ่อนตัวเลือกเอกสารอ้างอิงหลักไว้ก่อน (ตามสเปกผู้ใช้)
+    if (!selectedType) {
+      updateEvFormControlsDropdown();
+      return;
+    }
+    
+    // กรองเฉพาะเอกสารที่มีประเภทตรงกัน
+    const filteredDocs = appState.masterDocs.filter(d => d.doc_type === selectedType);
+    filteredDocs.forEach(d => {
+      const opt = document.createElement("option");
+      opt.value = d.doc_id;
+      opt.innerText = `${d.doc_id} - ${d.title}`;
+      evDocSelect.appendChild(opt);
+    });
+    
+    updateEvFormControlsDropdown();
+  }
+
+  /**
+   * ฟังก์ชันอัปโหลดไฟล์เอกสารหลักตรงผ่านหน้าจอ และเติมลิงก์ Google Drive ให้อัตโนมัติ
+   */
+  function uploadMasterDocFileDirectly(event) {
+    const file = event.target.files[0];
+    if (!file) return;
+
+    const statusEl = document.getElementById("doc-upload-status");
+    statusEl.style.display = "block";
+    statusEl.innerHTML = `<span class="spinner" style="display:inline-block; vertical-align:middle; margin-right:6px; width:12px; height:12px; border-width:2px;"></span> กำลังอัปโหลดไฟล์ไปยัง Google Drive...`;
+
+    const reader = new FileReader();
+    reader.onload = function(e) {
+      const base64Data = e.target.result.split(',')[1];
+      google.script.run
+        .withSuccessHandler(function(driveUrl) {
+          document.getElementById("doc-form-link").value = driveUrl;
+          statusEl.innerHTML = "✅ อัปโหลดเสร็จสมบูรณ์ ระบบป้อนลิงก์ให้แล้ว!";
+          showToast("อัปโหลดเอกสารหลักขึ้น Google Drive เรียบร้อย", "success");
+        })
+        .withFailureHandler(function(err) {
+          statusEl.innerHTML = "❌ อัปโหลดล้มเหลว: " + err.message;
+          showToast("อัปโหลดล้มเหลว: " + err.message, "danger");
+        })
+        .apiUploadMasterDocumentFile(file.name, file.type, base64Data);
+    };
+    reader.readAsDataURL(file);
+  }
+
+  /**
+   * ดึงปีที่ไม่ซ้ำกันจากไฟล์หลักฐานทั้งหมดเพื่อป้อนใน Dropdown
+   */
+  function populateEvidenceYearFilter() {
+    const yearSelect = document.getElementById("filter-evidence-year");
+    if (!yearSelect) return;
+    
+    const selectedVal = yearSelect.value;
+    const years = [];
+    
+    appState.evidenceLogs.forEach(e => {
+      if (e.evidence_period) {
+        const year = e.evidence_period.split("-")[0];
+        if (year && !years.includes(year)) {
+          years.push(year);
+        }
+      }
+    });
+    
+    years.sort((a, b) => b - a);
+    
+    yearSelect.innerHTML = '<option value="">ทุกปี</option>';
+    years.forEach(y => {
+      const opt = document.createElement("option");
+      opt.value = y;
+      opt.innerText = `ปี ${y}`;
+      yearSelect.appendChild(opt);
+    });
+    
+    yearSelect.value = selectedVal;
+  }
+
+  /**
+   * เปลี่ยนหน้าการทำงาน (Switch Tab)
+   */
+  function switchView(viewName) {
+    // ปิดทุกหน้า
+    document.querySelectorAll(".app-view").forEach(el => el.classList.remove("active"));
+    document.querySelectorAll(".menu-item").forEach(el => el.classList.remove("active"));
+    
+    // เปิดหน้าใหม่
+    const activeView = document.getElementById(`view-${viewName}`);
+    if (activeView) activeView.classList.add("active");
+    
+    // เซ็ตลิงก์เมนูให้ active
+    const menuItems = document.querySelectorAll(".menu-item");
+    menuItems.forEach(el => {
+      if (el.getAttribute("onclick").includes(`'${viewName}'`)) {
+        el.classList.add("active");
+      }
+    });
+
+    // อัปเดตหัวข้อและคำบรรยายหน้า
+    const titles = {
+      dashboard: ["แดชบอร์ดภาพรวมระบบ", "สรุปภาพรวมความสอดคล้องตามข้อกำหนด ISO 27001"],
+      controls: ["ข้อกำหนดมาตรฐาน", "รายการข้อกำหนด ISO 27001 และสถานะประเมินความพร้อม"],
+      documents: ["เอกสารหลักระบบควบคุม", "รายการนโยบายและระเบียบปฏิบัติที่ประกาศใช้งาน"],
+      evidence: ["บันทึกประวัติหลักฐาน", "ประวัติการส่งไฟล์หลักฐานยืนยันความปลอดภัยและการทำงาน"],
+      "admin-users": ["จัดการสิทธิ์ผู้ใช้งาน", "เพิ่ม ค้นหา หรือปรับปรุงระดับสิทธิ์การเข้าถึงข้อมูลระบบ"],
+      "admin-audit": ["ประวัติกิจกรรม (Audit Trail)", "บันทึกความเปลี่ยนแปลงข้อมูลทั้งหมดเพื่อความมั่นคงปลอดภัยสารสนเทศ"]
+    };
+
+    if (titles[viewName]) {
+      document.getElementById("view-title").innerText = titles[viewName][0];
+      document.getElementById("view-desc").innerText = titles[viewName][1];
+    }
+
+    // โหลดตารางใหม่ให้เป็นปัจจุบันตามหน้า
+    if (viewName === 'controls') renderControlsTable();
+    else if (viewName === 'documents') renderDocumentsTable();
+    else if (viewName === 'evidence') renderEvidenceTable();
+    else if (viewName === 'admin-users') renderUsersTable();
+    else if (viewName === 'admin-audit') renderAuditTable();
+    else if (viewName === 'dashboard') {
+      showLoading(true);
+      google.script.run.withSuccessHandler(res => {
+        appState.complianceStats = res;
+        renderDashboard();
+        showLoading(false);
+      }).apiGetComplianceStats();
+    }
+  }
+
+  /**
+   * วาด Dashboard หน้าหลัก
+   */
+  function renderDashboard() {
+    const stats = appState.complianceStats;
+    document.getElementById("stat-total-controls").innerText = stats.Total;
+    document.getElementById("stat-ready-controls").innerText = stats.Ready;
+    document.getElementById("stat-total-docs").innerText = appState.masterDocs.length;
+    document.getElementById("stat-total-evidence").innerText = appState.evidenceLogs.length;
+
+    // สัดส่วน Ready
+    document.getElementById("count-ready").innerText = stats.Ready;
+    document.getElementById("count-progress").innerText = stats["In Progress"];
+    document.getElementById("count-missing").innerText = stats.Missing;
+    document.getElementById("count-na").innerText = stats["N/A"];
+
+    const percent = stats.Total > 0 ? Math.round((stats.Ready / stats.Total) * 100) : 0;
+    document.getElementById("compliance-percent-val").innerText = `${percent}%`;
+
+    // อัปเดตความกว้างแถบวงกลม (SVG Progress Stroke)
+    const circle = document.getElementById("compliance-progress-circle");
+    if (circle) {
+      const radius = circle.r.baseVal.value;
+      const circumference = 2 * Math.PI * radius; // 439.82
+      const offset = circumference - (percent / 100) * circumference;
+      circle.style.strokeDasharray = `${circumference}`;
+      circle.style.strokeDashoffset = offset;
+    }
+
+    // ดึงข้อกำหนดที่ค้าง (Missing / In Progress) มาแสดง
+    const pendingTable = document.getElementById("dashboard-pending-table");
+    pendingTable.innerHTML = "";
+    
+    const pendingControls = appState.isoControls.filter(c => c.assessment_status === "Missing" || c.assessment_status === "In Progress");
+    
+    if (pendingControls.length === 0) {
+      pendingTable.innerHTML = `<tr><td colspan="3" class="empty-state">🎉 ยินดีด้วย! ไม่มีข้อกำหนดค้างการแก้ไข</td></tr>`;
+      return;
+    }
+
+    pendingControls.slice(0, 10).forEach(c => {
+      const row = document.createElement("tr");
+      const statusBadge = c.assessment_status === "Missing" ? 'badge-danger' : 'badge-warning';
+      
+      row.innerHTML = `
+        <td style="font-weight:600; color:var(--primary);">${c.control_code}</td>
+        <td>${c.requirement}</td>
+        <td><span class="badge ${statusBadge}">${c.assessment_status}</span></td>
+      `;
+      pendingTable.appendChild(row);
+    });
+  }
+
+  /**
+   * วาดตารางข้อกำหนด ISO
+   */
+  function renderControlsTable() {
+    const search = document.getElementById("filter-control-search").value.toLowerCase();
+    const domain = document.getElementById("filter-control-domain").value;
+    const status = document.getElementById("filter-control-status").value;
+
+    const tbody = document.getElementById("controls-table-body");
+    tbody.innerHTML = "";
+
+    const filtered = appState.isoControls.filter(c => {
+      const matchSearch = c.control_code.toLowerCase().includes(search) || c.requirement.toLowerCase().includes(search);
+      const matchDomain = !domain || c.domain === domain;
+      const matchStatus = !status || c.assessment_status === status;
+      return matchSearch && matchDomain && matchStatus;
+    });
+
+    if (filtered.length === 0) {
+      tbody.innerHTML = `<tr><td colspan="5" class="empty-state">ไม่พบข้อกำหนดที่ค้นหา</td></tr>`;
+      return;
+    }
+
+    filtered.forEach(c => {
+      const row = document.createElement("tr");
+      let statusBadge = "badge-danger";
+      if (c.assessment_status === "Ready") statusBadge = "badge-success";
+      else if (c.assessment_status === "In Progress") statusBadge = "badge-warning";
+      else if (c.assessment_status === "N/A") statusBadge = "badge-muted";
+
+      row.innerHTML = `
+        <td style="font-weight:600; color:var(--primary);">${c.control_code}</td>
+        <td><span class="badge badge-info">${c.domain}</span></td>
+        <td style="font-size:0.85rem;">${c.requirement}</td>
+        <td><span class="badge ${statusBadge}">${c.assessment_status || "Missing"}</span></td>
+        <td style="text-align:center;">
+          <button class="btn btn-secondary btn-icon" onclick="openControlDetails('${c.control_code}')">
+            <svg style="width:16px; height:16px;" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"></path></svg>
+          </button>
+        </td>
+      `;
+      tbody.appendChild(row);
+    });
+  }
+
+  /**
+   * วาดตารางเอกสารหลัก
+   */
+  function renderDocumentsTable() {
+    const search = document.getElementById("filter-doc-search").value.toLowerCase();
+    const tbody = document.getElementById("documents-table-body");
+    tbody.innerHTML = "";
+
+    const filtered = appState.masterDocs.filter(d => {
+      return d.doc_id.toLowerCase().includes(search) || d.title.toLowerCase().includes(search);
+    });
+
+    if (filtered.length === 0) {
+      tbody.innerHTML = `<tr><td colspan="8" class="empty-state">ไม่พบรายการเอกสารในระบบ</td></tr>`;
+      return;
+    }
+
+    filtered.forEach(d => {
+      const row = document.createElement("tr");
+      let statusBadge = "badge-warning";
+      if (d.status === "Approved") statusBadge = "badge-success";
+      else if (d.status === "Obsolete") statusBadge = "badge-muted";
+
+      row.innerHTML = `
+        <td style="font-weight:600; color:var(--text-muted); white-space:nowrap;">${d.controls.join(", ") || "-"}</td>
+        <td style="font-weight:600; color:var(--primary); white-space:nowrap;">${d.doc_id}</td>
+        <td>
+          <div style="font-weight:500;">${d.title}</div>
+        </td>
+        <td style="font-size:0.85rem; white-space:nowrap;">${d.owner || "-"}</td>
+        <td style="white-space:nowrap; text-align:center;">${d.edition || "1"}</td>
+        <td style="white-space:nowrap; text-align:center;">${d.revision || "0"}</td>
+        <td style="white-space:nowrap;">${d.effective_date}</td>
+        <td style="text-align:center; white-space:nowrap;">
+          <div style="display:flex; justify-content:center; gap:8px;">
+            <a href="${d.drive_link}" target="_blank" class="btn btn-secondary btn-icon" title="เปิดลิงก์ไฟล์">
+              <svg style="width:16px; height:16px;" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"></path></svg>
+            </a>
+            <button class="btn btn-secondary btn-icon btn-admin-only" onclick="openEditDocModal('${d.doc_id}')" title="แก้ไขเอกสาร">
+              <svg style="width:16px; height:16px;" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"></path></svg>
+            </button>
+            <button class="btn btn-danger btn-icon btn-admin-only" onclick="deleteDocument('${d.doc_id}')" title="ลบเอกสาร">
+              <svg style="width:16px; height:16px;" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>
+            </button>
+          </div>
+        </td>
+      `;
+      tbody.appendChild(row);
+    });
+    
+    // อัปเดตการแสดงผลปุ่มควบคุมสำหรับ Non-Admin
+    updateUserUI();
+  }
+
+  /**
+   * วาดตารางไฟล์หลักฐาน
+   */
+  function renderEvidenceTable() {
+    const search = document.getElementById("filter-evidence-search").value.toLowerCase();
+    const selectedYear = document.getElementById("filter-evidence-year").value;
+    const selectedDocType = document.getElementById("filter-evidence-doc-type").value;
+    const selectedControl = document.getElementById("filter-evidence-control").value;
+    const selectedDept = document.getElementById("filter-evidence-dept").value;
+    const tbody = document.getElementById("evidence-table-body");
+    tbody.innerHTML = "";
+
+    const filtered = appState.evidenceLogs.filter(e => {
+      const matchSearch = e.details.toLowerCase().includes(search) || e.recorded_by.toLowerCase().includes(search) || e.doc_id.toLowerCase().includes(search);
+      
+      let matchYear = true;
+      if (selectedYear && e.evidence_period) {
+        const year = e.evidence_period.split("-")[0];
+        matchYear = (year === selectedYear);
+      }
+
+      let matchDocType = true;
+      const doc = appState.masterDocs.find(x => x.doc_id === e.doc_id);
+      if (selectedDocType) {
+        matchDocType = (doc && doc.doc_type === selectedDocType);
+      }
+
+      let matchControl = true;
+      if (selectedControl) {
+        matchControl = (doc && doc.controls && doc.controls.includes(selectedControl));
+      }
+
+      let matchDept = true;
+      if (selectedDept) {
+        const uploader = appState.users.find(u => u.user_email === e.recorded_by);
+        matchDept = (uploader && uploader.department === selectedDept);
+      }
+      
+      return matchSearch && matchYear && matchDocType && matchControl && matchDept;
+    });
+
+    if (filtered.length === 0) {
+      tbody.innerHTML = `<tr><td colspan="8" class="empty-state">ไม่พบรายการหลักฐานที่อัปโหลดเข้าสู่ระบบ</td></tr>`;
+      return;
+    }
+
+    // เรียงหลักฐานล่าสุดขึ้นก่อน
+    filtered.sort((a,b) => b.evidence_id - a.evidence_id);
+
+    filtered.forEach(e => {
+      const row = document.createElement("tr");
+      
+      // สิทธิ์จัดการ: Admin หรือเป็นคนส่งบันทึกแถวนั้นเอง
+      const canManage = (appState.user.role === "Admin" || e.recorded_by === appState.user.email);
+      let actionButtons = "";
+      if (canManage) {
+        actionButtons = `
+          <button class="btn btn-secondary btn-icon" onclick="openEditEvidenceModal(${e.evidence_id})" title="แก้ไขคำอธิบาย" style="padding:4px;">
+            <svg style="width:14px; height:14px;" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"></path></svg>
+          </button>
+          <button class="btn btn-danger btn-icon" onclick="deleteEvidenceLog(${e.evidence_id})" title="ลบรายการนี้" style="padding:4px; margin-left:4px;">
+            <svg style="width:14px; height:14px;" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>
+          </button>
+        `;
+      } else {
+        actionButtons = `<span style="color:var(--text-muted); font-size:0.75rem;">ไม่มีสิทธิ์แก้ไข</span>`;
+      }
+
+      row.innerHTML = `
+        <td style="font-weight:600; color:var(--text-muted); white-space:nowrap;">${e.evidence_id}</td>
+        <td style="font-size:0.8rem; white-space:nowrap;">${e.recorded_date}</td>
+        <td style="font-weight:600; color:var(--primary); white-space:nowrap;">${e.doc_id}</td>
+        <td style="white-space:nowrap;"><span class="badge badge-info">${e.evidence_period}</span></td>
+        <td style="font-size:0.85rem;">${e.details}</td>
+        <td style="white-space:nowrap;">
+          <a href="${e.drive_link}" target="_blank" class="btn btn-secondary btn-icon" style="padding:6px 12px; font-size:0.8rem; white-space:nowrap;">
+            <svg style="width:14px; height:14px; margin-right:4px;" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"></path></svg>
+            เปิดดูไฟล์
+          </a>
+        </td>
+        <td style="font-size:0.8rem; white-space:nowrap; max-width:180px; overflow:hidden; text-overflow:ellipsis;" title="${e.recorded_by}">${e.recorded_by}</td>
+        <td style="text-align:center; white-space:nowrap;">
+          <div style="display:flex; justify-content:center; align-items:center;">
+            ${actionButtons}
+          </div>
+        </td>
+      `;
+      tbody.appendChild(row);
+    });
+  }
+
+  /**
+   * ซิงค์ดรอปดาวน์เอกสารอ้างอิงหลัก สำหรับหน้าต่างแก้ไข
+   */
+  function populateEditReferenceDocumentsDropdown(selectedDocId) {
+    const docTypeSelect = document.getElementById("ev-edit-doc-type");
+    const evDocSelect = document.getElementById("ev-edit-doc");
+    if (!evDocSelect || !docTypeSelect) return;
+    
+    const selectedType = docTypeSelect.value;
+    evDocSelect.innerHTML = '<option value="">-- เลือกเอกสารอ้างอิงหลัก --</option>';
+    
+    if (!selectedType) {
+      updateEditEvFormControlsDropdown();
+      return;
+    }
+    
+    const filteredDocs = appState.masterDocs.filter(d => d.doc_type === selectedType);
+    filteredDocs.forEach(d => {
+      const opt = document.createElement("option");
+      opt.value = d.doc_id;
+      opt.innerText = `${d.doc_id} - ${d.title}`;
+      evDocSelect.appendChild(opt);
+    });
+    
+    if (selectedDocId) {
+      evDocSelect.value = selectedDocId;
+    }
+    updateEditEvFormControlsDropdown();
+  }
+
+  /**
+   * ซิงค์ดรอปดาวน์หัวข้อ ISO Control สำหรับหน้าต่างแก้ไข
+   */
+  function updateEditEvFormControlsDropdown(selectedControlCode) {
+    const docId = document.getElementById("ev-edit-doc").value;
+    const ctrlSelect = document.getElementById("ev-edit-control");
+    ctrlSelect.innerHTML = '<option value="">-- เลือกข้อกำหนด --</option>';
+    
+    if (!docId) return;
+
+    const doc = appState.masterDocs.find(x => x.doc_id === docId);
+    if (!doc || !doc.controls || doc.controls.length === 0) {
+      appState.isoControls.forEach(c => {
+        const opt = document.createElement("option");
+        opt.value = c.control_code;
+        opt.innerText = `${c.control_code} - ${c.requirement.substring(0, 50)}...`;
+        ctrlSelect.appendChild(opt);
+      });
+      if (selectedControlCode) ctrlSelect.value = selectedControlCode;
+      return;
+    }
+
+    doc.controls.forEach(code => {
+      const c = appState.isoControls.find(x => x.control_code === code);
+      if (c) {
+        const opt = document.createElement("option");
+        opt.value = c.control_code;
+        opt.innerText = `${c.control_code} - ${c.requirement.substring(0, 50)}...`;
+        ctrlSelect.appendChild(opt);
+      }
+    });
+    if (selectedControlCode) {
+      ctrlSelect.value = selectedControlCode;
+    }
+  }
+
+  let isCurrentFileDeleted = false;
+
+  /**
+   * ฟังก์ชันเรียกใช้งานเมื่อกดยกเลิกไฟล์ปัจจุบันออก
+   */
+  window.markCurrentFileDeleted = function() {
+    isCurrentFileDeleted = true;
+    const currentFileNameEl = document.getElementById("ev-edit-current-file-name");
+    currentFileNameEl.innerHTML = `<span style="color:var(--danger); font-weight:600; display:flex; align-items:center; gap:4px;">
+      <svg style="width:14px; height:14px;" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"></path></svg>
+      ⚠️ ไฟล์เดิมจะถูกลบออกเมื่อกดบันทึกการแก้ไข
+    </span>`;
+    document.getElementById("btn-delete-current-file").style.display = "none";
+  };
+
+  /**
+   * เปิดฟอร์มแก้ไขรายการยื่นงานหลักฐานแบบฟูลฟังก์ชัน
+   */
+  function openEditEvidenceModal(evidenceId) {
+    const e = appState.evidenceLogs.find(x => x.evidence_id == evidenceId);
+    if (!e) return;
+    
+    isCurrentFileDeleted = false; // รีเซ็ตสถานะการสั่งลบไฟล์เก่า
+    
+    document.getElementById("ev-edit-id").value = e.evidence_id;
+    document.getElementById("ev-edit-period").value = e.evidence_period;
+    document.getElementById("ev-edit-details").value = e.details;
+    document.getElementById("ev-edit-file").value = "";
+    document.getElementById("ev-edit-upload-status").style.display = "none";
+    document.getElementById("btn-submit-evidence-edit").disabled = false;
+    
+    // แสดงลิงก์ไฟล์เดิมปัจจุบัน
+    const currentFileContainer = document.getElementById("ev-edit-current-file-container");
+    const currentFileNameEl = document.getElementById("ev-edit-current-file-name");
+    const deleteFileBtn = document.getElementById("btn-delete-current-file");
+    if (e.drive_link) {
+      currentFileContainer.style.display = "flex";
+      currentFileNameEl.innerHTML = `<a href="${e.drive_link}" target="_blank" style="color:var(--primary); font-weight:600; text-decoration:underline; display:flex; align-items:center; gap:6px;">
+        <svg style="width:14px; height:14px;" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"></path></svg>
+        🔗 คลิกเพื่อเปิดดูไฟล์หลักฐานเดิม
+      </a>`;
+      deleteFileBtn.style.display = "inline-block";
+    } else {
+      currentFileContainer.style.display = "none";
+    }
+    
+    // ล้างสถานะปุ่มยกเลิกของช่องเลือกไฟล์ใหม่
+    clearEditFileInput();
+    
+    // ตั้งค่าประเภทเอกสารและเอกสารหลักเริ่มต้น
+    const doc = appState.masterDocs.find(x => x.doc_id === e.doc_id);
+    if (doc) {
+      document.getElementById("ev-edit-doc-type").value = doc.doc_type;
+      populateEditReferenceDocumentsDropdown(e.doc_id);
+      
+      // ดึง Control แรกขึ้นมาเป็นพรีเซ็ต
+      if (doc.controls && doc.controls.length > 0) {
+        updateEditEvFormControlsDropdown(doc.controls[0]);
+      } else {
+        updateEditEvFormControlsDropdown();
+      }
+    } else {
+      document.getElementById("ev-edit-doc-type").value = "";
+      document.getElementById("ev-edit-doc").innerHTML = '<option value="">-- เลือกเอกสารอ้างอิงหลัก --</option>';
+      document.getElementById("ev-edit-control").innerHTML = '<option value="">-- เลือกข้อกำหนด --</option>';
+    }
+    
+    openModal("modal-evidence-edit-form");
+  }
+
+  /**
+   * ฟังก์ชันเรียกใช้งานเมื่อมีการเลือกไฟล์ใหม่ในฟอร์มแก้ไข
+   */
+  window.onEditFileChange = function(event) {
+    const file = event.target.files[0];
+    const clearBtn = document.getElementById("btn-clear-edit-file");
+    if (file) {
+      clearBtn.style.display = "inline-block";
+    } else {
+      clearBtn.style.display = "none";
+    }
+  };
+
+  /**
+   * ล้างค่าไฟล์หลักฐานใหม่ที่ถูกเลือก
+   */
+  window.clearEditFileInput = function() {
+    const fileInput = document.getElementById("ev-edit-file");
+    if (fileInput) fileInput.value = "";
+    const clearBtn = document.getElementById("btn-clear-edit-file");
+    if (clearBtn) clearBtn.style.display = "none";
+  };
+
+  /**
+   * ส่งบันทึกการแก้ไขรายการหลักฐานการทำงาน
+   */
+  function submitEvidenceEditForm() {
+    const evidenceId = document.getElementById("ev-edit-id").value;
+    const docId = document.getElementById("ev-edit-doc").value;
+    const controlCode = document.getElementById("ev-edit-control").value;
+    const period = document.getElementById("ev-edit-period").value.trim();
+    const details = document.getElementById("ev-edit-details").value.trim();
+    const fileInput = document.getElementById("ev-edit-file");
+    
+    if (!docId || !period || !details) {
+      showToast("กรุณากรอกข้อมูลให้ครบถ้วน (รวมถึงเลือกเอกสารอ้างอิงหลักด้วย)", "warning");
+      return;
+    }
+    
+    const file = fileInput.files[0];
+    if (file) {
+      // มีการแนบไฟล์ใหม่เพื่อมาอัปเดตแทนที่
+      if (!controlCode) {
+        showToast("กรุณาเลือกหัวข้อ ISO Control สำหรับอัปโหลดไฟล์ใหม่เข้าโฟลเดอร์", "warning");
+        return;
+      }
+      
+      const statusEl = document.getElementById("ev-edit-upload-status");
+      const statusTextEl = document.getElementById("ev-edit-upload-status-text");
+      statusEl.style.display = "block";
+      statusTextEl.innerText = "กำลังอัปโหลดไฟล์ใหม่ขึ้น Google Drive...";
+      document.getElementById("btn-submit-evidence-edit").disabled = true;
+      
+      const reader = new FileReader();
+      reader.onload = function(e) {
+        const fileData = {
+          data: e.target.result.split(',')[1],
+          mimeType: file.type,
+          fileName: file.name
+        };
+        
+        google.script.run
+          .withSuccessHandler(function() {
+            closeModal("modal-evidence-edit-form");
+            showToast("แก้ไขรายละเอียดและอัปเดตไฟล์หลักฐานเรียบร้อยแล้ว", "success");
+            
+            google.script.run.withSuccessHandler(res => {
+              appState.evidenceLogs = res;
+              renderEvidenceTable();
+              showLoading(false);
+            }).apiGetEvidenceLogs();
+            
+            google.script.run.withSuccessHandler(res => appState.auditTrails = res).apiGetAuditTrails();
+          })
+          .withFailureHandler(function(err) {
+            statusEl.style.display = "none";
+            document.getElementById("btn-submit-evidence-edit").disabled = false;
+            showToast(err.message, "danger");
+          })
+          .apiUpdateEvidenceLog(evidenceId, period, details, docId, fileData, controlCode, userIpAddress, isCurrentFileDeleted);
+      };
+      reader.readAsDataURL(file);
+    } else {
+      // แก้ไขเฉพาะข้อมูลข้อความทั่วไป หรือกดสั่งลบไฟล์เก่าอย่างเดียว
+      showLoading(true);
+      google.script.run
+        .withSuccessHandler(function() {
+          closeModal("modal-evidence-edit-form");
+          showToast(isCurrentFileDeleted ? "ลบไฟล์หลักฐานและบันทึกการแก้ไขเรียบร้อยแล้ว" : "แก้ไขรายละเอียดหลักฐานเรียบร้อยแล้ว", "success");
+          
+          google.script.run.withSuccessHandler(res => {
+            appState.evidenceLogs = res;
+            renderEvidenceTable();
+            showLoading(false);
+          }).apiGetEvidenceLogs();
+          
+          google.script.run.withSuccessHandler(res => appState.auditTrails = res).apiGetAuditTrails();
+        })
+        .withFailureHandler(function(err) {
+          showLoading(false);
+          showToast(err.message, "danger");
+        })
+        .apiUpdateEvidenceLog(evidenceId, period, details, docId, null, null, userIpAddress, isCurrentFileDeleted);
+    }
+  }
+
+  /**
+   * ลบประวัติการยื่นเอกสารหลักฐาน
+   */
+  function deleteEvidenceLog(evidenceId) {
+    if (!confirm(`คุณแน่ใจหรือไม่ว่าต้องการลบหลักฐานรหัส: ${evidenceId} ? \n(ไฟล์จริงใน Google Drive จะถูกย้ายไปถังขยะด้วย)`)) {
+      return;
+    }
+    
+    showLoading(true);
+    google.script.run
+      .withSuccessHandler(function() {
+        showToast("ลบรายการหลักฐานเรียบร้อยแล้ว", "success");
+        google.script.run.withSuccessHandler(res => {
+          appState.evidenceLogs = res;
+          renderEvidenceTable();
+          showLoading(false);
+        }).apiGetEvidenceLogs();
+        
+        google.script.run.withSuccessHandler(res => appState.auditTrails = res).apiGetAuditTrails();
+      })
+      .withFailureHandler(function(err) {
+        showLoading(false);
+        showToast(err.message, "danger");
+      })
+      .apiDeleteEvidenceLog(evidenceId, userIpAddress);
+  }
+
+  /**
+   * วาดตารางรายชื่อผู้ใช้สิทธิ์
+   */
+  function renderUsersTable() {
+    const search = document.getElementById("filter-user-search").value.toLowerCase();
+    const tbody = document.getElementById("users-table-body");
+    tbody.innerHTML = "";
+
+    const filtered = appState.users.filter(u => {
+      return u.name.toLowerCase().includes(search) || u.user_email.toLowerCase().includes(search) || (u.user_code && u.user_code.toLowerCase().includes(search));
+    });
+
+    if (filtered.length === 0) {
+      tbody.innerHTML = `<tr><td colspan="8" class="empty-state">ไม่พบข้อมูลผู้ใช้</td></tr>`;
+      return;
+    }
+
+    filtered.forEach(u => {
+      const row = document.createElement("tr");
+      const statusBadge = u.account_status === "Active" ? "badge-success" : "badge-danger";
+      row.innerHTML = `
+        <td style="font-weight:600; color:var(--primary);">${u.user_code || "-"}</td>
+        <td style="font-weight:600;">${u.user_email}</td>
+        <td>${u.name}</td>
+        <td>${u.department}</td>
+        <td><span class="badge badge-info">${u.role}</span></td>
+        <td><span class="badge ${statusBadge}">${u.account_status}</span></td>
+        <td>${u.last_review_date}</td>
+        <td style="text-align:center;">
+          <div style="display:flex; justify-content:center; gap:8px;">
+            <button class="btn btn-secondary btn-icon" onclick="openEditUserModal('${u.user_email}')">
+              <svg style="width:16px; height:16px;" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"></path></svg>
+            </button>
+            <button class="btn btn-danger btn-icon" onclick="deleteUser('${u.user_email}')">
+              <svg style="width:16px; height:16px;" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>
+            </button>
+          </div>
+        </td>
+      `;
+      tbody.appendChild(row);
+    });
+  }
+
+  /**
+   * วาดตารางประวัติกิจกรรม (Audit Trail)
+   */
+  function renderAuditTable() {
+    const search = document.getElementById("filter-audit-search").value.toLowerCase();
+    const tbody = document.getElementById("audit-table-body");
+    tbody.innerHTML = "";
+
+    const filtered = appState.auditTrails.filter(a => {
+      return a.action.toLowerCase().includes(search) || a.change_details.toLowerCase().includes(search) || a.ref_id.toLowerCase().includes(search);
+    });
+
+    if (filtered.length === 0) {
+      tbody.innerHTML = `<tr><td colspan="8" class="empty-state">ไม่มีข้อมูลกิจกรรมบันทึกไว้</td></tr>`;
+      return;
+    }
+
+    filtered.sort((a,b) => b.trail_id - a.trail_id);
+
+    filtered.forEach(a => {
+      const row = document.createElement("tr");
+      let actionBadge = "badge-info";
+      if (a.action === "Create") actionBadge = "badge-success";
+      else if (a.action === "Update") actionBadge = "badge-warning";
+      else if (a.action === "Delete") actionBadge = "badge-danger";
+
+      row.innerHTML = `
+        <td>${a.trail_id}</td>
+        <td style="font-size:0.8rem;">${a.timestamp}</td>
+        <td><span class="badge ${actionBadge}">${a.action}</span></td>
+        <td>${a.ref_table}</td>
+        <td style="font-weight:600; color:var(--primary);">${a.ref_id}</td>
+        <td style="font-size:0.8rem;">${a.performed_by}</td>
+        <td style="font-size:0.85rem;">${a.change_details}</td>
+        <td style="font-size:0.8rem; color:var(--text-muted);">${a.ip_address}</td>
+      `;
+      tbody.appendChild(row);
+    });
+  }
+
+  /**
+   * ------------------------------------------------------------
+   * MODAL & FORM FUNCTIONS
+   * ------------------------------------------------------------
+   */
+
+  function openModal(id) {
+    document.getElementById(id).classList.add("active");
+  }
+
+  function closeModal(id) {
+    document.getElementById(id).classList.remove("active");
+  }
+
+  // เปิดแสดงรายละเอียดข้อกำหนด ISO และประเมินสถานะ
+  function openControlDetails(code) {
+    const c = appState.isoControls.find(x => x.control_code === code);
+    if (!c) return;
+
+    document.getElementById("m-control-title").innerText = `ข้อกำหนดสอดคล้อง [${c.control_code}]`;
+    document.getElementById("m-control-domain").innerText = c.domain;
+    document.getElementById("m-control-desc").innerText = c.requirement;
+
+    // หาเอกสารหลักที่แมปไว้
+    const mapped = appState.masterDocs.filter(d => d.controls && d.controls.includes(code));
+    const docsBox = document.getElementById("m-control-docs-list");
+    if (mapped.length === 0) {
+      docsBox.innerHTML = `<span style="color:var(--text-muted); font-style:italic;">ยังไม่มีเอกสารหลักเชื่อมโยงกับข้อกำหนดนี้</span>`;
+    } else {
+      docsBox.innerHTML = mapped.map(d => `
+        <div style="margin-bottom:8px; display:flex; justify-content:space-between; align-items:center;">
+          <span style="font-weight:600;">📄 ${d.doc_id} - ${d.title}</span>
+          <a href="${d.drive_link}" target="_blank" style="color:var(--primary); font-size:0.8rem; text-decoration:none;">เปิดดูบน Drive ↗</a>
+        </div>
+      `).join("");
+    }
+
+    // เซ็ตข้อมูลฟอร์มอัปเดต
+    document.getElementById("edit-control-code").value = c.control_code;
+    document.getElementById("edit-control-status").value = c.assessment_status || "Missing";
+    document.getElementById("edit-control-gap").value = c.gap_analysis || "";
+
+    openModal("modal-control-detail");
+  }
+
+  // กดส่งการอัปเดตสถานะ Control
+  function saveControlStatus() {
+    const code = document.getElementById("edit-control-code").value;
+    const status = document.getElementById("edit-control-status").value;
+    const gap = document.getElementById("edit-control-gap").value;
+
+    showLoading(true);
+    google.script.run
+      .withSuccessHandler(function() {
+        // อัปเดต Local State ทันที
+        const c = appState.isoControls.find(x => x.control_code === code);
+        if (c) {
+          c.assessment_status = status;
+          c.gap_analysis = gap;
+        }
+        closeModal("modal-control-detail");
+        showToast("ปรับปรุงสถานะการประเมินสำเร็จ", "success");
+        
+        // โหลดข้อมูลแอดมิน log ใหม่ด้วย
+        google.script.run.withSuccessHandler(res => appState.auditTrails = res).apiGetAuditTrails();
+        
+        // คืนค่า loading และเปลี่ยนวิวโต๊ะตาราง
+        loadMainData();
+      })
+      .withFailureHandler(function(err) {
+        showLoading(false);
+        showToast(err.message, "danger");
+      })
+      .apiUpdateControlStatus(code, status, gap, userIpAddress);
+  }
+
+  // ดึงฟอร์มเอกสารหลัก
+  function openAddDocModal() {
+    document.getElementById("m-doc-title-header").innerText = "เพิ่มเอกสารหลักควบคุมชุดใหม่";
+    document.getElementById("doc-form").reset();
+    document.getElementById("doc-form-id").disabled = false; // เปิดช่องแก้ไข PK
+    
+    // เติมลิสต์ Checkbox ของข้อกำหนด ISO ทั้งหมดให้เลือก
+    buildControlsCheckboxes([]);
+    openModal("modal-document-form");
+  }
+
+  function openEditDocModal(docId) {
+    const d = appState.masterDocs.find(x => x.doc_id === docId);
+    if (!d) return;
+
+    document.getElementById("m-doc-title-header").innerText = `แก้ไขเอกสารควบคุม [${d.doc_id}]`;
+    document.getElementById("doc-form-id").value = d.doc_id;
+    document.getElementById("doc-form-id").disabled = true; // ล็อก PK
+    document.getElementById("doc-form-title").value = d.title;
+    document.getElementById("doc-form-type").value = d.doc_type;
+    document.getElementById("doc-form-owner").value = d.owner || "";
+    document.getElementById("doc-form-edition").value = d.edition || "1";
+    document.getElementById("doc-form-revision").value = d.revision || "0";
+    document.getElementById("doc-form-status").value = d.status;
+    document.getElementById("doc-form-freq").value = d.review_frequency_months;
+    document.getElementById("doc-form-approver").value = d.approved_by;
+    document.getElementById("doc-form-effective").value = d.effective_date;
+    document.getElementById("doc-form-evidence-freq").value = d.evidence_frequency;
+    document.getElementById("doc-form-link").value = d.drive_link;
+
+    buildControlsCheckboxes(d.controls);
+    openModal("modal-document-form");
+  }
+
+  // เติม Checkbox ให้ฟอร์มเลือก Mapping
+  function buildControlsCheckboxes(selectedCodes) {
+    const box = document.getElementById("doc-form-controls-list");
+    box.innerHTML = "";
+    
+    appState.isoControls.forEach(c => {
+      const item = document.createElement("div");
+      item.className = "checkbox-item";
+      
+      const checked = selectedCodes.includes(c.control_code) ? "checked" : "";
+      item.innerHTML = `
+        <input type="checkbox" id="chk-ctrl-${c.control_code}" value="${c.control_code}" ${checked}>
+        <label for="chk-ctrl-${c.control_code}" style="cursor:pointer; font-weight:500;">
+          <span style="color:var(--primary); font-weight:600;">[${c.control_code}]</span> ${c.requirement.substring(0, 70)}...
+        </label>
+      `;
+      box.appendChild(item);
+    });
+  }
+
+  // ส่งบันทึกเอกสาร
+  function submitDocForm() {
+    const docId = document.getElementById("doc-form-id").value.trim();
+    const title = document.getElementById("doc-form-title").value.trim();
+    if (!docId || !title) {
+      showToast("กรุณากรอกรหัสเอกสารและชื่อเรื่อง", "warning");
+      return;
+    }
+
+    const docData = {
+      doc_id: docId,
+      title: title,
+      doc_type: document.getElementById("doc-form-type").value,
+      owner: document.getElementById("doc-form-owner").value.trim(),
+      edition: document.getElementById("doc-form-edition").value.trim(),
+      revision: document.getElementById("doc-form-revision").value.trim(),
+      status: document.getElementById("doc-form-status").value,
+      review_frequency_months: Number(document.getElementById("doc-form-freq").value),
+      approved_by: document.getElementById("doc-form-approver").value.trim(),
+      effective_date: document.getElementById("doc-form-effective").value,
+      evidence_frequency: document.getElementById("doc-form-evidence-freq").value,
+      drive_link: document.getElementById("doc-form-link").value.trim()
+    };
+
+    // ดึงค่า checkbox ของ controls ที่เลือก
+    const selectedControls = [];
+    appState.isoControls.forEach(c => {
+      const chk = document.getElementById(`chk-ctrl-${c.control_code}`);
+      if (chk && chk.checked) {
+        selectedControls.push(c.control_code);
+      }
+    });
+
+    showLoading(true);
+    google.script.run
+      .withSuccessHandler(function() {
+        closeModal("modal-document-form");
+        showToast("บันทึกข้อมูลเอกสารควบคุมหลักเสร็จเรียบร้อย", "success");
+        
+        // รีเฟรชตารางเอกสาร
+        google.script.run.withSuccessHandler(res => {
+          appState.masterDocs = res;
+          renderDocumentsTable();
+          populateReferenceDocumentsDropdown(); // ซิงค์ dropdown ทะเบียนเอกสารอ้างอิงหลัก
+          showLoading(false);
+        }).apiGetMasterDocuments();
+        
+        // รีโหลดประวัติกิจกรรม
+        google.script.run.withSuccessHandler(res => appState.auditTrails = res).apiGetAuditTrails();
+      })
+      .withFailureHandler(function(err) {
+        showLoading(false);
+        showToast(err.message, "danger");
+      })
+      .apiSaveMasterDocument(docData, selectedControls, userIpAddress);
+  }
+
+  // ลบเอกสารหลัก
+  function deleteDocument(docId) {
+    if (!confirm(`คุณแน่ใจหรือไม่ว่าต้องการลบเอกสารหลักรหัส: ${docId} ? \n(ข้อมูล Mapping และการผูกโยงจะถูกลบทั้งหมด)`)) {
+      return;
+    }
+
+    showLoading(true);
+    google.script.run
+      .withSuccessHandler(function() {
+        showToast("ลบเอกสารหลักเสร็จสิ้น", "success");
+        // โหลดข้อมูลเอกสารใหม่
+        google.script.run.withSuccessHandler(res => {
+          appState.masterDocs = res;
+          renderDocumentsTable();
+          populateReferenceDocumentsDropdown(); // ซิงค์ dropdown ทะเบียนเอกสารอ้างอิงหลัก
+          showLoading(false);
+        }).apiGetMasterDocuments();
+        
+        google.script.run.withSuccessHandler(res => appState.auditTrails = res).apiGetAuditTrails();
+      })
+      .withFailureHandler(function(err) {
+        showLoading(false);
+        showToast(err.message, "danger");
+      })
+      .apiDeleteMasterDocument(docId, userIpAddress);
+  }
+
+  // ฟอร์มยื่นหลักฐาน (Upload Evidence)
+  function openUploadEvidenceModal() {
+    document.getElementById("ev-form-doc-type").value = "";
+    document.getElementById("ev-form-doc").value = "";
+    document.getElementById("ev-form-doc").innerHTML = '<option value="">-- เลือกเอกสารอ้างอิงหลัก --</option>';
+    document.getElementById("ev-form-control").innerHTML = '<option value="">-- เลือกข้อกำหนด --</option>';
+    document.getElementById("ev-form-period").value = Utilities_getYearMonthString();
+    document.getElementById("ev-form-details").value = "";
+    document.getElementById("ev-form-file").value = "";
+    document.getElementById("upload-status").style.display = "none";
+    document.getElementById("btn-submit-evidence").disabled = false;
+    
+    openModal("modal-evidence-form");
+  }
+
+  // เมื่อเลือกเอกสารหลัก ให้กรอง Dropdown ข้อกำหนด ISO เฉพาะที่แมปไว้กับเอกสารนี้ขึ้นมาให้เลือก
+  function updateEvFormControlsDropdown() {
+    const docId = document.getElementById("ev-form-doc").value;
+    const ctrlSelect = document.getElementById("ev-form-control");
+    ctrlSelect.innerHTML = '<option value="">-- เลือกข้อกำหนด --</option>';
+    
+    if (!docId) return;
+
+    const doc = appState.masterDocs.find(x => x.doc_id === docId);
+    if (!doc || !doc.controls || doc.controls.length === 0) {
+      // ถ้าไม่ได้ตั้งค่า map เจาะจง ให้เสนอทุกข้อกำหนดเลยเป็นทางเลือกสำรอง
+      appState.isoControls.forEach(c => {
+        const opt = document.createElement("option");
+        opt.value = c.control_code;
+        opt.innerText = `${c.control_code} - ${c.requirement.substring(0, 50)}...`;
+        ctrlSelect.appendChild(opt);
+      });
+      return;
+    }
+
+    doc.controls.forEach(code => {
+      const c = appState.isoControls.find(x => x.control_code === code);
+      if (c) {
+        const opt = document.createElement("option");
+        opt.value = c.control_code;
+        opt.innerText = `${c.control_code} - ${c.requirement.substring(0, 50)}...`;
+        ctrlSelect.appendChild(opt);
+      }
+    });
+  }
+
+  // ยื่นหลักฐานอัปโหลดไฟล์
+  function submitEvidenceForm() {
+    const docId = document.getElementById("ev-form-doc").value;
+    const controlCode = document.getElementById("ev-form-control").value;
+    const period = document.getElementById("ev-form-period").value.trim();
+    const details = document.getElementById("ev-form-details").value.trim();
+    const fileInput = document.getElementById("ev-form-file");
+
+    if (!docId || !controlCode || !period || !details || fileInput.files.length === 0) {
+      showToast("กรุณากรอกข้อมูลและเลือกไฟล์หลักฐานเพื่อยื่นตรวจสอบ", "warning");
+      return;
+    }
+
+    const file = fileInput.files[0];
+    
+    // จำกัดขนาดไฟล์ที่ 15MB สำหรับ Google Apps Script API Payload Limit
+    if (file.size > 15 * 1024 * 1024) {
+      showToast("ไฟล์มีขนาดใหญ่เกินกว่า 15MB กรุณาอัปโหลดลง Drive ตรงๆ แล้วแปะลิงก์ในช่องรายละเอียดแทน หรือแยกไฟล์", "danger");
+      return;
+    }
+
+    // แสดงสถานะเตรียมการอัปโหลด
+    const statusBox = document.getElementById("upload-status");
+    const statusText = document.getElementById("upload-status-text");
+    const submitBtn = document.getElementById("btn-submit-evidence");
+    
+    statusBox.style.display = "block";
+    statusText.innerText = "กำลังอ่านไฟล์และถอดรหัส Base64...";
+    submitBtn.disabled = true;
+
+    // แปลงไฟล์เป็น Base64 ฝั่ง Client เพื่อส่งไปบันทึกบน Drive
+    const reader = new FileReader();
+    reader.onload = function(e) {
+      statusText.innerText = "ไฟล์พร้อมแล้ว กำลังอัปโหลดขึ้น Google Drive...";
+      
+      const rawData = e.target.result.split(',')[1];
+      const fileData = {
+        data: rawData,
+        mimeType: file.type,
+        fileName: file.name
+      };
+
+      google.script.run
+        .withSuccessHandler(function() {
+          closeModal("modal-evidence-form");
+          showToast("อัปโหลดไฟล์และลงทะเบียนหลักฐานสำเร็จ", "success");
+          
+          // โหลดข้อมูลหลักฐานใหม่
+          google.script.run.withSuccessHandler(res => {
+            appState.evidenceLogs = res;
+            renderEvidenceTable();
+          }).apiGetEvidenceLogs();
+          
+          google.script.run.withSuccessHandler(res => appState.auditTrails = res).apiGetAuditTrails();
+        })
+        .withFailureHandler(function(err) {
+          statusBox.style.display = "none";
+          submitBtn.disabled = false;
+          showToast(`เกิดข้อผิดพลาดในการอัปโหลด: ${err.message}`, "danger");
+        })
+        .apiUploadEvidence(docId, controlCode, period, details, fileData, userIpAddress);
+    };
+    reader.readAsDataURL(file);
+  }
+
+  /**
+   * คำนวณรหัสสมาชิกคนถัดไปโดยอัตโนมัติ (เช่น EMP-001, EMP-002...)
+   */
+  function getNextUserCode() {
+    let maxNum = 0;
+    const prefix = "EMP-";
+    
+    if (appState.users && appState.users.length > 0) {
+      appState.users.forEach(u => {
+        if (u.user_code && u.user_code.startsWith(prefix)) {
+          const numPart = u.user_code.replace(prefix, "");
+          const num = parseInt(numPart, 10);
+          if (!isNaN(num) && num > maxNum) {
+            maxNum = num;
+          }
+        }
+      });
+    }
+    
+    const nextNum = maxNum + 1;
+    return prefix + String(nextNum).padStart(3, '0');
+  }
+
+  // จัดการฟอร์มผู้ใช้งาน (User Access Form)
+  function openAddUserModal() {
+    document.getElementById("m-user-title-header").innerText = "ลงทะเบียนสิทธิ์เข้าถึงพนักงานใหม่";
+    document.getElementById("user-form").reset();
+    document.getElementById("user-form-email").disabled = false;
+    
+    // เติมรหัสพนักงานให้เลยแบบอัตโนมัติ (แต่ยังคงเปิดให้พิมพ์แก้ไขเองได้หากต้องการใช้รหัสเฉพาะ)
+    document.getElementById("user-form-code").value = getNextUserCode();
+    
+    openModal("modal-user-form");
+  }
+
+  function openEditUserModal(email) {
+    const u = appState.users.find(x => x.user_email === email);
+    if (!u) return;
+
+    document.getElementById("m-user-title-header").innerText = `แก้ไขระดับสิทธิ์ [${u.user_email}]`;
+    document.getElementById("user-form-code").value = u.user_code || "";
+    document.getElementById("user-form-email").value = u.user_email;
+    document.getElementById("user-form-email").disabled = true;
+    document.getElementById("user-form-name").value = u.name;
+    document.getElementById("user-form-dept").value = u.department;
+    document.getElementById("user-form-role").value = u.role;
+    document.getElementById("user-form-status").value = u.account_status;
+
+    openModal("modal-user-form");
+  }
+
+  function submitUserForm() {
+    const code = document.getElementById("user-form-code").value.trim();
+    const email = document.getElementById("user-form-email").value.trim();
+    const name = document.getElementById("user-form-name").value.trim();
+    
+    if (!code || !email || !name) {
+      showToast("กรุณากรอกรหัสสมาชิก อีเมล และชื่อ-นามสกุลจริง", "warning");
+      return;
+    }
+
+    const userData = {
+      user_email: email,
+      user_code: code,
+      name: name,
+      department: document.getElementById("user-form-dept").value,
+      role: document.getElementById("user-form-role").value,
+      account_status: document.getElementById("user-form-status").value
+    };
+
+    showLoading(true);
+    google.script.run
+      .withSuccessHandler(function() {
+        closeModal("modal-user-form");
+        showToast("บันทึกระดับสิทธิ์ผู้ใช้งานสำเร็จ", "success");
+        
+        // รีเฟรชผู้ใช้
+        google.script.run.withSuccessHandler(res => {
+          appState.users = res;
+          renderUsersTable();
+          showLoading(false);
+        }).apiGetUserAccessMatrix();
+        
+        google.script.run.withSuccessHandler(res => appState.auditTrails = res).apiGetAuditTrails();
+      })
+      .withFailureHandler(function(err) {
+        showLoading(false);
+        showToast(err.message, "danger");
+      })
+      .apiSaveUser(userData, userIpAddress);
+  }
+
+  function deleteUser(email) {
+    if (!confirm(`คุณแน่ใจหรือไม่ว่าต้องการลบสิทธิ์การเข้าถึงบัญชี: ${email} ?`)) {
+      return;
+    }
+
+    showLoading(true);
+    google.script.run
+      .withSuccessHandler(function() {
+        showToast("ลบรายชื่อสิทธิ์ผู้ใช้เสร็จสิ้น", "success");
+        
+        google.script.run.withSuccessHandler(res => {
+          appState.users = res;
+          renderUsersTable();
+          showLoading(false);
+        }).apiGetUserAccessMatrix();
+        
+        google.script.run.withSuccessHandler(res => appState.auditTrails = res).apiGetAuditTrails();
+      })
+      .withFailureHandler(function(err) {
+        showLoading(false);
+        showToast(err.message, "danger");
+      })
+      .apiDeleteUser(email, userIpAddress);
+  }
+
+  /**
+   * UTILITIES HELPERS
+   */
+
+  function showLoading(show) {
+    const loader = document.getElementById("loading-overlay");
+    if (show) loader.classList.add("active");
+    else loader.classList.remove("active");
+  }
+
+  function showToast(message, type = "info") {
+    const toast = document.getElementById("toast");
+    const msgBox = document.getElementById("toast-message");
+    const iconBox = document.getElementById("toast-icon");
+    
+    toast.className = `toast toast-${type}`;
+    msgBox.innerText = message;
+    
+    // ตั้งไอคอนตามประเภท
+    let icon = "🔔";
+    if (type === "success") icon = "✅";
+    else if (type === "danger") icon = "❌";
+    else if (type === "warning") icon = "⚠️";
+    iconBox.innerText = icon;
+
+    toast.classList.add("active");
+    
+    // ตั้งเวลาปิดเองใน 4 วินาที
+    setTimeout(function() {
+      toast.classList.remove("active");
+    }, 4000);
+  }
+
+  function Utilities_getYearMonthString() {
+    const d = new Date();
+    const mm = String(d.getMonth() + 1).padStart(2, '0');
+    return `${d.getFullYear()}-${mm}`;
+  }
+</script>
