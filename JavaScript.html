@@ -197,19 +197,37 @@
   }
 
   /**
-   * โหลดประเภทเอกสารที่มีอยู่แล้วใน masterDocs มาเติมใน datalist
-   * ให้ช่อง doc-form-type พิมพ์เองได้หรือเลือกจาก suggestion
+   * ดึงค่า dropdown ของ doc_type จาก Data Validation ที่กำหนดใน Master_Documents!A
+   * แล้วนำมาเติมใน <select id="doc-form-type"> ในหน้าเว็บ
    */
   function populateDocTypeDropdowns() {
-    const datalist = document.getElementById("doc-type-options");
-    if (!datalist) return;
-
-    // ดึงค่าที่ไม่ซ้ำจากข้อมูลเอกสารที่มีอยู่
-    const existingTypes = [...new Set(
-      appState.masterDocs.map(d => d.doc_type).filter(Boolean)
-    )];
-
-    datalist.innerHTML = existingTypes.map(t => `<option value="${t}">`).join("");
+    google.script.run
+      .withSuccessHandler(function(types) {
+        const select = document.getElementById("doc-form-type");
+        if (!select) return;
+        const current = select.value;
+        select.innerHTML = '<option value="">-- เลือกประเภทเอกสาร --</option>';
+        (types || []).forEach(function(t) {
+          const opt = document.createElement("option");
+          opt.value = t;
+          opt.innerText = t;
+          if (t === current) opt.selected = true;
+          select.appendChild(opt);
+        });
+      })
+      .withFailureHandler(function() {
+        // fallback: ถ้าดึงไม่ได้ ให้ใช้ค่า default
+        const select = document.getElementById("doc-form-type");
+        if (!select) return;
+        const defaults = ["Policy", "Procedure", "Form", "Report"];
+        select.innerHTML = '<option value="">-- เลือกประเภทเอกสาร --</option>';
+        defaults.forEach(function(t) {
+          const opt = document.createElement("option");
+          opt.value = t; opt.innerText = t;
+          select.appendChild(opt);
+        });
+      })
+      .apiGetDocTypeOptions();
   }
 
   /**

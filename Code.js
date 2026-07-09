@@ -81,6 +81,31 @@ function apiGetUserAccessMatrix() {
   return DB.getTableData("User_Access_Matrix");
 }
 
+/**
+ * อ่านรายการ dropdown ของ doc_type จาก Data Validation ที่น้องกำหนดใน Master_Documents!A
+ * คืนค่าเป็น Array ของ string เช่น ["Policy","Procedure","Form","Report"]
+ */
+function apiGetDocTypeOptions() {
+  try {
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    var sheet = ss.getSheetByName("Master_Documents");
+    if (!sheet) return [];
+
+    var rule = sheet.getRange("A2").getDataValidation();
+    if (!rule) return [];
+
+    var criteria = rule.getCriteriaType();
+    // กรณี dropdown จากรายการ (VALUE_IN_LIST)
+    if (criteria === SpreadsheetApp.DataValidationCriteria.VALUE_IN_LIST) {
+      return rule.getCriteriaValues()[0]; // array ของค่า
+    }
+    return [];
+  } catch(e) {
+    Logger.log("apiGetDocTypeOptions error: " + e.message);
+    return [];
+  }
+}
+
 function apiSaveMasterDocument(docData, selectedControls, ipAddress) {
   return saveMasterDocument(docData, selectedControls, ipAddress);
 }
@@ -526,5 +551,15 @@ function fixValidationRules() {
       Logger.log("ไม่สามารถแก้ Validation ของ Document_Control_Mapping: " + e.message);
     }
   }
-}
 
+  // 3. ลบ Sheet Document_Types ที่เหลือทิ้งออก (ถ้ายังมีอยู่)
+  try {
+    var docTypeSheet = ss.getSheetByName("Document_Types");
+    if (docTypeSheet) {
+      ss.deleteSheet(docTypeSheet);
+      Logger.log("ลบ Sheet Document_Types ออกเรียบร้อยแล้ว");
+    }
+  } catch(e) {
+    Logger.log("ไม่สามารถลบ Sheet Document_Types: " + e.message);
+  }
+}
