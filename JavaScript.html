@@ -328,6 +328,12 @@
     const file = event.target.files[0];
     if (!file) return;
 
+    // ป้อนชื่อไฟล์เข้าช่อง "ชื่อเอกสาร (Title)" โดยอัตโนมัติ
+    const titleInput = document.getElementById("doc-form-title");
+    if (titleInput) {
+      titleInput.value = file.name;
+    }
+
     const statusEl = document.getElementById("doc-upload-status");
     statusEl.style.display = "block";
     statusEl.innerHTML = `<span class="spinner" style="display:inline-block; vertical-align:middle; margin-right:6px; width:12px; height:12px; border-width:2px;"></span> กำลังอัปโหลดไฟล์ไปยัง Google Drive...`;
