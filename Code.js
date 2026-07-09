@@ -552,7 +552,16 @@ function fixValidationRules() {
     }
   }
 
-  // 3. ลบ Sheet Document_Types ที่เหลือทิ้งออก (ถ้ายังมีอยู่)
+  // 3. เคลียร์ Validation ของคอลัมน์ Title (คอลัมน์ C) ใน Master_Documents!C2:C1000
+  // ป้องกันกรณีระบบเข้าใจผิดไปใส่ dropdown ให้คอลัมน์ชื่อเรื่อง/ชื่อไฟล์
+  try {
+    masterSheet.getRange("C2:C1000").clearDataValidations();
+    Logger.log("ล้าง Validation ของ Master_Documents!C2:C1000 (Title) สำเร็จ");
+  } catch(e) {
+    Logger.log("ไม่สามารถล้าง Validation ของ Master_Documents!C: " + e.message);
+  }
+
+  // 4. ลบ Sheet Document_Types ที่เหลือทิ้งออก (ถ้ายังมีอยู่)
   try {
     var docTypeSheet = ss.getSheetByName("Document_Types");
     if (docTypeSheet) {
