@@ -576,15 +576,14 @@ function fixValidationRules() {
     }
   }
 
-  // 3. รีเซ็ตและจัดระเบียบ Validation ของ Master_Documents ทั้งแผ่นใหม่ทั้งหมด
+  // 3. รีเซ็ตและจัดระเบียบ Validation ของ Master_Documents ทั้งแผ่นใหม่ทั้งหมด (ยกเว้นคอลัมน์ A ที่ผู้ใช้ตั้งค่า dropdown เอง)
   // เพื่อแก้ปัญหา Google Sheets เลื่อนตำแหน่งกฎ Validation ผิดคอลัมน์ (เช่น เอา dropdown ประเภทไปโผล่ที่คอลัมน์ C: Title)
   try {
-    // 3.1 ล้าง Validation ทุกคอลัมน์ใน Master_Documents ตั้งแต่แถว 2 ลงไป
-    masterSheet.getRange("A2:Z1000").clearDataValidations();
+    // 3.1 ล้าง Validation เฉพาะคอลัมน์ B ถึง Z ตั้งแต่แถว 2 ลงไป (เก็บคอลัมน์ A ไว้ให้ผู้ใช้ตั้งค่าอิสระ)
+    masterSheet.getRange("B2:Z1000").clearDataValidations();
     
-    // 3.2 เซ็ตความถูกต้องข้อมูลใหม่ให้ตรงคอลัมน์จริง
+    // 3.2 เซ็ตความถูกต้องข้อมูลใหม่ให้ตรงคอลัมน์จริง (ไม่ยุ่งกับคอลัมน์ A)
     var masterValidations = {
-      "A2:A1000": { type: "list", values: ["Policy", "Procedure", "Form", "Report"] }, // คอลัมน์ A: doc_type
       "G2:G1000": { type: "date" },                                                     // คอลัมน์ G: effective_date
       "K2:K1000": { type: "date" },                                                     // คอลัมน์ K: next_review_date
       "L2:L1000": { type: "list", values: ["Monthly", "Quarterly", "Annually", "Ad-hoc"] }, // คอลัมน์ L: evidence_frequency
@@ -604,7 +603,7 @@ function fixValidationRules() {
         cellRange.setDataValidation(ruleBuilder.build());
       }
     }
-    Logger.log("รีเซ็ตระเบียบ Validation ของ Master_Documents สำเร็จ");
+    Logger.log("รีเซ็ตระเบียบ Validation ของ Master_Documents สำเร็จ (รักษาประเภทเอกสารคอลัมน์ A)");
   } catch(e) {
     Logger.log("ไม่สามารถรีเซ็ต Validation ของ Master_Documents: " + e.message);
   }
