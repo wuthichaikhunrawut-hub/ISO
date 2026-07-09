@@ -552,13 +552,37 @@ function fixValidationRules() {
     }
   }
 
-  // 3. เคลียร์ Validation ของคอลัมน์ Title (คอลัมน์ C) ใน Master_Documents!C2:C1000
-  // ป้องกันกรณีระบบเข้าใจผิดไปใส่ dropdown ให้คอลัมน์ชื่อเรื่อง/ชื่อไฟล์
+  // 3. รีเซ็ตและจัดระเบียบ Validation ของ Master_Documents ทั้งแผ่นใหม่ทั้งหมด
+  // เพื่อแก้ปัญหา Google Sheets เลื่อนตำแหน่งกฎ Validation ผิดคอลัมน์ (เช่น เอา dropdown ประเภทไปโผล่ที่คอลัมน์ C: Title)
   try {
-    masterSheet.getRange("C2:C1000").clearDataValidations();
-    Logger.log("ล้าง Validation ของ Master_Documents!C2:C1000 (Title) สำเร็จ");
+    // 3.1 ล้าง Validation ทุกคอลัมน์ใน Master_Documents ตั้งแต่แถว 2 ลงไป
+    masterSheet.getRange("A2:Z1000").clearDataValidations();
+    
+    // 3.2 เซ็ตความถูกต้องข้อมูลใหม่ให้ตรงคอลัมน์จริง
+    var masterValidations = {
+      "A2:A1000": { type: "list", values: ["Policy", "Procedure", "Form", "Report"] }, // คอลัมน์ A: doc_type
+      "G2:G1000": { type: "date" },                                                     // คอลัมน์ G: effective_date
+      "K2:K1000": { type: "date" },                                                     // คอลัมน์ K: next_review_date
+      "L2:L1000": { type: "list", values: ["Monthly", "Quarterly", "Annually", "Ad-hoc"] }, // คอลัมน์ L: evidence_frequency
+      "M2:M1000": { type: "list", values: ["Draft", "Approved", "Obsolete"] }            // คอลัมน์ M: status
+    };
+    
+    for (var rangeStr in masterValidations) {
+      var ruleInfo = masterValidations[rangeStr];
+      var cellRange = masterSheet.getRange(rangeStr);
+      var ruleBuilder = SpreadsheetApp.newDataValidation().setAllowInvalid(true); // อนุญาตให้เขียนค่าอื่นได้ ป้องกันระบบขัดข้อง
+      
+      if (ruleInfo.type === "list") {
+        ruleBuilder.requireValueInList(ruleInfo.values, true);
+        cellRange.setDataValidation(ruleBuilder.build());
+      } else if (ruleInfo.type === "date") {
+        ruleBuilder.requireDateOnOrAfter(new Date(1970, 0, 1));
+        cellRange.setDataValidation(ruleBuilder.build());
+      }
+    }
+    Logger.log("รีเซ็ตระเบียบ Validation ของ Master_Documents สำเร็จ");
   } catch(e) {
-    Logger.log("ไม่สามารถล้าง Validation ของ Master_Documents!C: " + e.message);
+    Logger.log("ไม่สามารถรีเซ็ต Validation ของ Master_Documents: " + e.message);
   }
 
   // 4. ลบ Sheet Document_Types ที่เหลือทิ้งออก (ถ้ายังมีอยู่)
@@ -572,3 +596,4 @@ function fixValidationRules() {
     Logger.log("ไม่สามารถลบ Sheet Document_Types: " + e.message);
   }
 }
+
